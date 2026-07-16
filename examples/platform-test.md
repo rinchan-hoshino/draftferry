@@ -1,4 +1,4 @@
-# 搜狐号一键排版验收稿
+# 八平台一键排版验收稿
 
 这是一段用于验证正文样式的普通文本，包含**粗体**和[链接](https://www.sohu.com/)。
 
@@ -22,7 +22,7 @@
 ## 代码块
 
 ```js
-console.log('搜狐号 Markdown 一键排版')
+console.log('Markdown 八平台一键排版 Preview')
 ```
 
 ## Mermaid

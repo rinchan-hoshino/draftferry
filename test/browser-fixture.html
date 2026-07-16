@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>搜狐号编辑器本地烟雾测试</title>
+  <meta name="rin-platform-fixture" content="sohu">
+  <title>八平台脚本 · 搜狐适配器本地烟雾测试</title>
   <style>
     body { margin: 40px auto; max-width: 900px; font-family: system-ui, sans-serif; }
     input { box-sizing: border-box; width: 100%; margin-bottom: 16px; padding: 12px; font-size: 20px; }
@@ -10,7 +11,7 @@
   </style>
 </head>
 <body>
-  <h1>搜狐号编辑器本地烟雾测试</h1>
+  <h1>八平台脚本 · 搜狐适配器本地烟雾测试</h1>
   <input placeholder="请输入标题">
   <div class="ql-container"><div class="ql-editor"><p><br></p></div></div>
   <script>
@@ -33,6 +34,6 @@
       find(node) { return node.classList.contains('ql-container') ? smokeQuill : null },
     }
   </script>
-  <script src="./sohu-markdown.user.js"></script>
+  <script src="./multiplatform-markdown.user.js"></script>
 </body>
 </html>

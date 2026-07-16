@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { JSDOM } from 'jsdom'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const [fixtureSource, artifact] = await Promise.all([
+  readFile(resolve(root, 'test/browser-fixture.html'), 'utf8'),
+  readFile(resolve(root, 'dist/multiplatform-markdown.user.js'), 'utf8'),
+])
+const fixture = fixtureSource.replace(
+  /<script src="\.\/multiplatform-markdown\.user\.js"><\/script>/,
+  '',
+)
+const dom = new JSDOM(fixture, {
+  url: 'file:///multiplatform-markdown-smoke/browser-fixture.html',
+  runScripts: 'outside-only',
+  pretendToBeVisual: true,
+})
+
+dom.window.eval(artifact)
+await new Promise((resolve) => dom.window.setTimeout(resolve, 0))
+
+const panel = dom.window.document.querySelector('#rin-multiplatform-markdown-panel')
+assert.ok(panel, '构建产物没有创建排版面板')
+assert.equal(
+  panel.querySelector('[data-rin-action="import"]')?.textContent,
+  '导入 Markdown',
+)
+assert.match(
+  panel.querySelector('[data-rin-status]')?.textContent ?? '',
+  /搜狐号 · 0\.2 Preview/,
+)
+assert.ok(panel.querySelector('[data-rin-files][multiple]'))
+console.log('verified built userscript UI fixture')

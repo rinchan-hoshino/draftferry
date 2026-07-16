@@ -1,5 +1,7 @@
 import createDOMPurify from 'dompurify'
 import { Marked } from 'marked'
+import TurndownService from 'turndown'
+import { gfm } from 'turndown-plugin-gfm'
 
 const TITLE_SELECTOR = 'input[placeholder*="标题"]'
 const EDITOR_SELECTOR = '.ql-editor'
@@ -46,12 +48,20 @@ function resolveWindow(windowObject) {
   return resolved
 }
 
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
 function createMarkedRenderer(mermaidSources) {
   return {
     code(token) {
       const language = (token.lang ?? '').trim().toLowerCase().split(/\s+/)[0]
       if (language !== 'mermaid') {
-        return false
+        const safeLanguage = language.replace(/[^a-z0-9_-]/g, '')
+        return `<pre data-rin-code-language="${safeLanguage}"><code>${escapeHtml(token.text)}</code></pre>`
       }
 
       const index = mermaidSources.push(token.text) - 1
@@ -91,6 +101,26 @@ async function replaceMermaidPlaceholders(container, mermaidSources, renderMerma
     image.setAttribute('data-rin-mermaid', 'true')
     placeholder.replaceWith(image)
   }
+}
+
+function createPortableMarkdown(container) {
+  const turndown = new TurndownService({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    bulletListMarker: '-',
+  })
+  turndown.use(gfm)
+  turndown.addRule('rin-fenced-code-language', {
+    filter(node) {
+      return node.nodeName === 'PRE' && node.hasAttribute('data-rin-code-language')
+    },
+    replacement(_content, node) {
+      const language = node.getAttribute('data-rin-code-language') ?? ''
+      const code = (node.textContent ?? '').replace(/\n$/, '')
+      return `\n\n\`\`\`${language}\n${code}\n\`\`\`\n\n`
+    },
+  })
+  return turndown.turndown(container.innerHTML)
 }
 
 function replaceLocalImages(container, localImages) {
@@ -145,17 +175,19 @@ export async function renderMarkdownArticle(markdown, options = {}) {
   const title = firstHeading?.textContent?.trim() ?? ''
   firstHeading?.remove()
 
+  const localImages = options.localImages ?? new Map()
   await replaceMermaidPlaceholders(
     container,
     mermaidSources,
     options.renderMermaid,
   )
-  replaceLocalImages(container, options.localImages ?? new Map())
+  replaceLocalImages(container, localImages)
   applySohuStyles(container)
 
   return {
     title,
     html: container.innerHTML,
+    portableMarkdown: createPortableMarkdown(container),
     mermaidCount: mermaidSources.length,
   }
 }
@@ -198,12 +230,83 @@ const CANONICAL_TAGS = new Set([
 ])
 
 function normalizeText(text) {
-  return text.replace(/\s+/g, ' ').trim()
+  return text.replace(/\s+/g, ' ')
+}
+
+const STRUCTURAL_WHITESPACE_PARENTS = new Set([
+  'root', 'table', 'tbody', 'tfoot', 'thead', 'tr', 'ul', 'ol',
+])
+const TRIM_OUTER_TEXT_PARENTS = new Set([
+  'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p', 'td', 'th',
+])
+
+function isTextSignature(signature) {
+  return signature?.[0] === 'text'
+}
+
+function normalizeSemanticChildren(children, parentTag) {
+  let normalized = children.map((child) => (
+    isTextSignature(child) ? ['text', child[1]] : child
+  ))
+  if (STRUCTURAL_WHITESPACE_PARENTS.has(parentTag)) {
+    normalized = normalized.filter((child) => (
+      !isTextSignature(child) || child[1].trim()
+    ))
+  }
+  if (TRIM_OUTER_TEXT_PARENTS.has(parentTag) && normalized.length) {
+    if (isTextSignature(normalized[0])) {
+      normalized[0][1] = normalized[0][1].trimStart()
+    }
+    const last = normalized.at(-1)
+    if (isTextSignature(last)) {
+      last[1] = last[1].trimEnd()
+    }
+  }
+  return normalized.filter((child) => (
+    !isTextSignature(child) || child[1] !== ''
+  ))
 }
 
 function canonicalTagName(element) {
   const tagName = element.tagName.toLowerCase()
   return { b: 'strong', i: 'em', s: 'del', strike: 'del' }[tagName] ?? tagName
+}
+
+function normalizedStyle(element) {
+  return Array.from(
+    { length: element.style.length },
+    (_unused, index) => element.style.item(index),
+  ).map((property) => [
+      property,
+      element.style.getPropertyValue(property).trim(),
+      element.style.getPropertyPriority(property),
+    ])
+    .sort(([left], [right]) => left.localeCompare(right))
+}
+
+function semanticAttributes(element, tagName) {
+  const names = new Set(['dir'])
+  const byTag = {
+    a: ['href'],
+    blockquote: ['cite'],
+    img: ['src', 'alt', 'width', 'height'],
+    li: ['value'],
+    ol: ['start', 'reversed', 'type'],
+    td: ['colspan', 'rowspan'],
+    th: ['colspan', 'rowspan', 'scope'],
+  }
+  for (const name of byTag[tagName] ?? []) {
+    names.add(name)
+  }
+  const attributes = [...names]
+    .filter((name) => element.hasAttribute(name))
+    .map((name) => [name, element.getAttribute(name)])
+    .sort(([left], [right]) => left.localeCompare(right))
+  const style = normalizedStyle(element)
+  if (style.length) {
+    attributes.push(['style', style])
+  }
+  return attributes
 }
 
 function semanticNode(node, preserveWhitespace = false) {
@@ -218,14 +321,18 @@ function semanticNode(node, preserveWhitespace = false) {
 
   const tagName = canonicalTagName(node)
   const preserveChildrenWhitespace = preserveWhitespace || tagName === 'pre' || tagName === 'code'
-  const children = [...node.childNodes]
-    .map((child) => semanticNode(child, preserveChildrenWhitespace))
-    .filter(Boolean)
+  const attributes = semanticAttributes(node, tagName)
+  const children = normalizeSemanticChildren(
+    [...node.childNodes]
+      .map((child) => semanticNode(child, preserveChildrenWhitespace))
+      .filter(Boolean),
+    tagName,
+  )
   if (tagName === 'img') {
-    return ['img', node.getAttribute('src') ?? '', node.getAttribute('alt') ?? '']
+    return ['img', attributes]
   }
   if (tagName === 'a') {
-    return ['a', node.getAttribute('href') ?? '', children]
+    return ['a', attributes, children]
   }
   if (tagName === 'p' && children.length === 1 && children[0][0] === 'img') {
     return children[0]
@@ -233,13 +340,14 @@ function semanticNode(node, preserveWhitespace = false) {
   if (!CANONICAL_TAGS.has(tagName)) {
     return children
   }
-  return [tagName, children]
+  return [tagName, attributes, children]
 }
 
-function semanticSignature(container) {
-  return JSON.stringify(
+export function semanticSignature(container) {
+  return JSON.stringify(normalizeSemanticChildren(
     [...container.childNodes].map(semanticNode).filter(Boolean),
-  )
+    'root',
+  ))
 }
 
 function assertEditorAcceptedArticle(document, editor, expectedHtml) {
@@ -307,6 +415,7 @@ export async function injectSohuArticle(document, article) {
   const quill = getSohuQuill(windowObject, editor)
   const previousDelta = cloneDelta(windowObject, quill.getContents())
   const previousTitle = titleInput.value
+  const previousHtml = editor.innerHTML
   try {
     editor.focus()
     quill.clipboard.dangerouslyPasteHTML(article.html, 'user')
@@ -329,14 +438,25 @@ export async function injectSohuArticle(document, article) {
       throw new Error('搜狐在写入后改变了标题或正文')
     }
   } catch (error) {
-    if (titleInput.value !== previousTitle) {
-      try {
-        setInputValue(windowObject, titleInput, previousTitle, false)
-      } catch {
-        // 标题 setter 自身异常时，原值通常未改变；保留最初错误。
+    try {
+      if (titleInput.value !== previousTitle) {
+        setInputValue(windowObject, titleInput, previousTitle)
       }
+      quill.setContents(previousDelta, 'user')
+      await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+      if (
+        titleInput.value !== previousTitle
+        || JSON.stringify(quill.getContents()) !== JSON.stringify(previousDelta)
+      ) {
+        throw new Error('标题或 Quill Delta 未恢复', { cause: error })
+      }
+      assertEditorAcceptedArticle(document, editor, previousHtml)
+    } catch (rollbackError) {
+      throw new Error(
+        `搜狐：写入失败且回滚未通过验证，请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+        { cause: rollbackError },
+      )
     }
-    quill.setContents(previousDelta, 'silent')
     throw error
   }
 

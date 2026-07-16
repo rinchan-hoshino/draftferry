@@ -1,13 +1,14 @@
 {
-  "name": "sohu-markdown-userscript",
-  "version": "0.1.0",
-  "description": "将 Markdown 转换并填入搜狐号编辑器的 Tampermonkey 用户脚本",
+  "name": "multiplatform-markdown-userscript",
+  "version": "0.2.0",
+  "description": "将 Markdown 转换并安全填入八个内容平台的 Tampermonkey Preview 用户脚本",
   "scripts": {
     "test": "node --test",
     "build": "node scripts/build.js",
-    "check": "npm run lint && npm test && npm run build && npm run verify:dist",
+    "check": "npm run lint && npm test && npm run build && npm run verify:dist && npm run verify:ui",
     "lint": "eslint src scripts test/*.js",
-    "verify:dist": "node scripts/verify-dist.js"
+    "verify:dist": "node scripts/verify-dist.js",
+    "verify:ui": "node scripts/verify-ui.js"
   },
   "license": "MIT",
   "private": true,
@@ -15,7 +16,9 @@
   "dependencies": {
     "dompurify": "^3.4.12",
     "marked": "^18.0.6",
-    "mermaid": "^11.16.0"
+    "mermaid": "^11.16.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -32,7 +32,7 @@ graph TD
 \`\`\`
 `
 
-test('将代表性 Markdown 转成经过清理的搜狐兼容 HTML', async () => {
+test('将代表性 Markdown 转成经过清理的富文本与可移植 Markdown', async () => {
   const renderedMermaid = []
   const article = await renderMarkdownArticle(representativeMarkdown, {
     windowObject: renderWindow,
@@ -52,6 +52,15 @@ test('将代表性 Markdown 转成经过清理的搜狐兼容 HTML', async () =>
   assert.match(article.html, /<pre[^>]+style=/i)
   assert.match(article.html, /<img[^>]+data-rin-mermaid="true"/i)
   assert.match(article.html, /data:image\/png;base64,bWVybWFpZA==/)
+  assert.doesNotMatch(article.portableMarkdown, /^# 测试文章$/m)
+  assert.doesNotMatch(article.portableMarkdown, /```mermaid/)
+  assert.doesNotMatch(article.portableMarkdown, /<script|onerror/i)
+  assert.match(article.portableMarkdown, /\| 项目 \| 结果 \|/)
+  assert.match(article.portableMarkdown, /```js\nconsole\.log\('hello'\)\n```/)
+  assert.match(
+    article.portableMarkdown,
+    /!\[Mermaid 流程图 1\]\(data:image\/png;base64,bWVybWFpZA==\)/,
+  )
 })
 
 test('拒绝未提供的本地相对图片，避免静默生成破图', async () => {
@@ -80,6 +89,7 @@ function installFakeQuill(window, transform = (html) => html) {
   const editor = window.document.querySelector('.ql-editor')
   let contents = { ops: [{ insert: '\n' }] }
   let restoreCalls = 0
+  const restoreSources = []
   const quill = {
     clipboard: {
       dangerouslyPasteHTML(html) {
@@ -90,9 +100,10 @@ function installFakeQuill(window, transform = (html) => html) {
     getContents() {
       return structuredClone(contents)
     },
-    setContents(nextContents) {
+    setContents(nextContents, source) {
       contents = structuredClone(nextContents)
       restoreCalls += 1
+      restoreSources.push(source)
       editor.innerHTML = '<p><br></p>'
     },
   }
@@ -101,7 +112,11 @@ function installFakeQuill(window, transform = (html) => html) {
       return node.classList?.contains('ql-container') ? quill : null
     },
   }
-  return { quill, getRestoreCalls: () => restoreCalls }
+  return {
+    quill,
+    getRestoreCalls: () => restoreCalls,
+    getRestoreSources: () => restoreSources,
+  }
 }
 
 function createSohuDom() {
@@ -162,6 +177,7 @@ test('搜狐只接受部分结构时拒绝误报成功并恢复 Quill Delta', as
   )
   assert.equal(editor.innerHTML, '<p><br></p>')
   assert.equal(fake.getRestoreCalls(), 1)
+  assert.deepEqual(fake.getRestoreSources(), ['user'])
   assert.deepEqual(fake.quill.getContents(), { ops: [{ insert: '\n' }] })
   assert.equal(window.document.querySelector('input').value, '')
 })
@@ -208,6 +224,59 @@ test('代码块缩进或换行被改变时拒绝', async () => {
   )
 })
 
+test('富文本样式被剥离时拒绝误报成功', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  installFakeQuill(window, () => '<h2>标题</h2><p>正文</p>')
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '',
+      html: '<h2 style="font-size:22px">标题</h2><p style="line-height:1.75">正文</p>',
+    }),
+    /搜狐编辑器改变了文章结构/,
+  )
+})
+
+test('等价但声明顺序不同的样式仍可通过', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  installFakeQuill(window, () => '<p style="font-size:16px;color:red">正文</p>')
+
+  await injectSohuArticle(window.document, {
+    title: '',
+    html: '<p style="color:red;font-size:16px">正文</p>',
+  })
+})
+
+test('列表起始值或表格跨列被改变时拒绝', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  installFakeQuill(window, () => '<ol><li>第三项</li></ol><table><tbody><tr><td>跨列</td></tr></tbody></table>')
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '',
+      html: '<ol start="3"><li value="3">第三项</li></ol><table><tbody><tr><td colspan="2">跨列</td></tr></tbody></table>',
+    }),
+    /搜狐编辑器改变了文章结构/,
+  )
+})
+
+test('行内节点两侧空格丢失时拒绝误报成功', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  installFakeQuill(window, () => '<p>A<strong>B</strong>C</p>')
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '',
+      html: '<p>A <strong>B</strong> C</p>',
+    }),
+    /搜狐编辑器改变了文章结构/,
+  )
+})
+
 test('图片来源或替代文字被改写时拒绝误报成功', async () => {
   const dom = createSohuDom()
   const { window } = dom
@@ -228,9 +297,13 @@ test('标题事件改写标题或正文时回滚整个导入', async () => {
   const editor = window.document.querySelector('.ql-editor')
   const title = window.document.querySelector('input')
   const fake = installFakeQuill(window)
+  let titleInputEvents = 0
   title.addEventListener('input', () => {
-    title.value = '被搜狐改写'
-    editor.innerHTML = '<p>被搜狐改写</p>'
+    titleInputEvents += 1
+    if (titleInputEvents === 1) {
+      title.value = '被搜狐改写'
+      editor.innerHTML = '<p>被搜狐改写</p>'
+    }
   })
 
   await assert.rejects(
@@ -241,7 +314,10 @@ test('标题事件改写标题或正文时回滚整个导入', async () => {
     /搜狐在写入后改变了标题或正文/,
   )
   assert.equal(fake.getRestoreCalls(), 1)
+  assert.deepEqual(fake.getRestoreSources(), ['user'])
   assert.deepEqual(fake.quill.getContents(), { ops: [{ insert: '\n' }] })
+  assert.equal(title.value, '')
+  assert.equal(titleInputEvents, 2)
 })
 
 test('标题写入异常时恢复 Quill Delta 和原标题', async () => {
@@ -266,6 +342,7 @@ test('标题写入异常时恢复 Quill Delta 和原标题', async () => {
   )
   assert.equal(editor.innerHTML, '<p><br></p>')
   assert.equal(fake.getRestoreCalls(), 1)
+  assert.deepEqual(fake.getRestoreSources(), ['user'])
   assert.deepEqual(fake.quill.getContents(), { ops: [{ insert: '\n' }] })
 })
 

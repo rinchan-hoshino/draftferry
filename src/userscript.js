@@ -1,12 +1,22 @@
-import {
-  hasExistingSohuDraft,
-  injectSohuArticle,
-  renderMarkdownArticle,
-} from './core.js'
+import { renderMarkdownArticle } from './core.js'
 import { renderMermaidPng } from './mermaid-png.js'
+import {
+  detectPlatform,
+  getPlatformById,
+  injectPlatformArticle,
+} from './platforms.js'
 
-const PANEL_ID = 'rin-sohu-markdown-panel'
-const EDITOR_SELECTOR = '.ql-editor'
+const PANEL_ID = 'rin-multiplatform-markdown-panel'
+
+function currentPlatform() {
+  const fixturePlatformId = document.querySelector(
+    'meta[name="rin-platform-fixture"]',
+  )?.content
+  if (window.location.protocol === 'file:' && fixturePlatformId) {
+    return getPlatformById(fixturePlatformId)
+  }
+  return detectPlatform(window.location)
+}
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -42,10 +52,11 @@ function findMarkdownFile(files) {
 function createPanel() {
   const panel = document.createElement('section')
   panel.id = PANEL_ID
-  panel.setAttribute('aria-label', '搜狐号 Markdown 一键排版')
+  const platformAtCreation = currentPlatform()
+  panel.setAttribute('aria-label', 'Markdown 八平台一键排版 Preview')
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
-    <span data-rin-status>进入文章编辑页后即可导入</span>
+    <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 0.2 Preview` : '当前平台未支持'}</span>
     <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden>
   `
   panel.setAttribute('style', [
@@ -89,8 +100,9 @@ function createPanel() {
   }
 
   button.addEventListener('click', () => {
-    if (!document.querySelector(EDITOR_SELECTOR)) {
-      setStatus('请先进入搜狐号文章编辑页', 'error')
+    const platform = currentPlatform()
+    if (!platform) {
+      setStatus('当前页面不是已支持的平台', 'error')
       return
     }
     fileInput.value = ''
@@ -105,17 +117,13 @@ function createPanel() {
       return
     }
 
-    const editor = document.querySelector(EDITOR_SELECTOR)
-    if (!editor) {
-      setStatus('搜狐正文编辑器已经离开，请重新进入编辑页', 'error')
-      return
-    }
-    if (hasExistingSohuDraft(document)) {
-      setStatus('当前标题或正文已有内容；请新建空白文章后再导入', 'error')
+    const platform = currentPlatform()
+    if (!platform) {
+      setStatus('当前页面不是已支持的平台', 'error')
       return
     }
 
-    setStatus('正在转换 Markdown 和 Mermaid…', 'busy')
+    setStatus(`正在为${platform.name}转换 Markdown 和 Mermaid…`, 'busy')
     try {
       const [markdown, localImages] = await Promise.all([
         markdownFile.text(),
@@ -126,12 +134,14 @@ function createPanel() {
         localImages,
         renderMermaid: renderMermaidPng,
       })
-      await injectSohuArticle(document, article)
+      const result = await injectPlatformArticle(document, article, {
+        fixturePlatformId: platform.id,
+      })
       setStatus(
-        `已填入正文${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,
+        `${platform.name}已填入（${result.mode}）${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,
       )
     } catch (error) {
-      console.error('[搜狐号 Markdown 一键排版]', error)
+      console.error('[Markdown 八平台一键排版]', error)
       setStatus(error instanceof Error ? error.message : String(error), 'error')
     }
   })
