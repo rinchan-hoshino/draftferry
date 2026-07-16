@@ -7,10 +7,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 
 const metadata = `// ==UserScript==
-// @name         Markdown 八平台一键排版（Preview）
-// @namespace    rinchan.local
+// @name         稿渡 · Markdown 一键排版（Preview）
+// @namespace    k-neco.draftferry
 // @version      ${packageJson.version}
-// @description  将 Markdown、图片和 Mermaid 流程图安全填入八个内容平台；不会自动保存或发布。
+// @description  识别八个平台；当前支持博客园、开源中国、微信公众号和搜狐号安全填入，其余平台仅提示待验证。
 // @author       RinChan
 // @match        https://i.cnblogs.com/posts/edit*
 // @match        https://editor.csdn.net/md/*
@@ -27,7 +27,7 @@ const metadata = `// ==UserScript==
 
 await build({
   entryPoints: [resolve(root, 'src/userscript.js')],
-  outfile: resolve(root, 'dist/multiplatform-markdown.user.js'),
+  outfile: resolve(root, 'dist/draftferry.user.js'),
   bundle: true,
   format: 'iife',
   platform: 'browser',

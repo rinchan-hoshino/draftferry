@@ -7,14 +7,14 @@ import { JSDOM } from 'jsdom'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const [fixtureSource, artifact] = await Promise.all([
   readFile(resolve(root, 'test/browser-fixture.html'), 'utf8'),
-  readFile(resolve(root, 'dist/multiplatform-markdown.user.js'), 'utf8'),
+  readFile(resolve(root, 'dist/draftferry.user.js'), 'utf8'),
 ])
 const fixture = fixtureSource.replace(
-  /<script src="\.\/multiplatform-markdown\.user\.js"><\/script>/,
+  /<script src="\.\/draftferry\.user\.js"><\/script>/,
   '',
 )
 const dom = new JSDOM(fixture, {
-  url: 'file:///multiplatform-markdown-smoke/browser-fixture.html',
+  url: 'file:///draftferry-smoke/browser-fixture.html',
   runScripts: 'outside-only',
   pretendToBeVisual: true,
 })
@@ -22,7 +22,7 @@ const dom = new JSDOM(fixture, {
 dom.window.eval(artifact)
 await new Promise((resolve) => dom.window.setTimeout(resolve, 0))
 
-const panel = dom.window.document.querySelector('#rin-multiplatform-markdown-panel')
+const panel = dom.window.document.querySelector('#rin-draftferry-panel')
 assert.ok(panel, '构建产物没有创建排版面板')
 assert.equal(
   panel.querySelector('[data-rin-action="import"]')?.textContent,

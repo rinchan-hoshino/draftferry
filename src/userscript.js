@@ -6,7 +6,7 @@ import {
   injectPlatformArticle,
 } from './platforms.js'
 
-const PANEL_ID = 'rin-multiplatform-markdown-panel'
+const PANEL_ID = 'rin-draftferry-panel'
 
 function currentPlatform() {
   const fixturePlatformId = document.querySelector(
@@ -53,7 +53,7 @@ function createPanel() {
   const panel = document.createElement('section')
   panel.id = PANEL_ID
   const platformAtCreation = currentPlatform()
-  panel.setAttribute('aria-label', 'Markdown 八平台一键排版 Preview')
+  panel.setAttribute('aria-label', '稿渡 · Markdown 一键排版 Preview')
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
     <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 0.2 Preview` : '当前平台未支持'}</span>
@@ -141,7 +141,7 @@ function createPanel() {
         `${platform.name}已填入（${result.mode}）${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,
       )
     } catch (error) {
-      console.error('[Markdown 八平台一键排版]', error)
+      console.error('[稿渡 · Markdown 一键排版]', error)
       setStatus(error instanceof Error ? error.message : String(error), 'error')
     }
   })

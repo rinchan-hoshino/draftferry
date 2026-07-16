@@ -5,14 +5,20 @@ import { dirname, resolve } from 'node:path'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const artifactPath = resolve(root, 'dist/multiplatform-markdown.user.js')
+const artifactPath = resolve(root, 'dist/draftferry.user.js')
 const [artifact, artifactStat] = await Promise.all([
   readFile(artifactPath, 'utf8'),
   stat(artifactPath),
 ])
 
 assert.ok(artifact.startsWith('// ==UserScript==\n'), '缺少油猴元数据头')
+assert.match(artifact, /\/\/ @name\s+稿渡 · Markdown 一键排版（Preview）/)
+assert.match(artifact, /\/\/ @namespace\s+k-neco\.draftferry/)
 assert.match(artifact, new RegExp(`// @version\\s+${packageJson.version}`))
+assert.match(
+  artifact,
+  /\/\/ @description\s+识别八个平台；当前支持博客园、开源中国、微信公众号和搜狐号安全填入，其余平台仅提示待验证。/,
+)
 const expectedMatches = [
   'https://i.cnblogs.com/posts/edit*',
   'https://editor.csdn.net/md/*',
@@ -34,6 +40,6 @@ assert.ok(artifactStat.size < 5 * 1024 * 1024, '构建产物超过 5 MiB')
 assert.match(artifact, /Bundled license information/)
 const userscriptArtifacts = (await readdir(resolve(root, 'dist')))
   .filter((name) => name.endsWith('.user.js'))
-assert.deepEqual(userscriptArtifacts, ['multiplatform-markdown.user.js'])
+assert.deepEqual(userscriptArtifacts, ['draftferry.user.js'])
 
 console.log(`verified ${artifactPath} (${artifactStat.size} bytes)`)

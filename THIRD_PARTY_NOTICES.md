@@ -10,4 +10,4 @@ The bundled userscript includes these runtime dependencies:
 
 Platform hostnames, current editor selectors, and editor-API discovery were cross-checked against [Doocs COSE](https://github.com/doocs/cose) commit `e70fa9e92a71cd2f10e0c883981f324a332162d4`, MIT License. This project does not copy COSE's automatic publishing behavior.
 
-License comments emitted by the bundler are retained at the end of `dist/multiplatform-markdown.user.js`.
+License comments emitted by the bundler are retained at the end of `dist/draftferry.user.js`.

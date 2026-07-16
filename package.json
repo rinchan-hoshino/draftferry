@@ -1,7 +1,7 @@
 {
-  "name": "multiplatform-markdown-userscript",
+  "name": "draftferry-userscript",
   "version": "0.2.0",
-  "description": "将 Markdown 转换并安全填入八个内容平台的 Tampermonkey Preview 用户脚本",
+  "description": "稿渡：识别八个内容平台，并在具备可验证编辑器边界的平台安全填入 Markdown",
   "scripts": {
     "test": "node --test",
     "build": "node scripts/build.js",
