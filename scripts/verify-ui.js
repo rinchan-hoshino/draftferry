@@ -30,7 +30,7 @@ assert.equal(
 )
 assert.match(
   panel.querySelector('[data-rin-status]')?.textContent ?? '',
-  /搜狐号 · 0\.2 Preview/,
+  /搜狐号 · 稿渡 Preview/,
 )
 assert.ok(panel.querySelector('[data-rin-files][multiple]'))
 console.log('verified built userscript UI fixture')

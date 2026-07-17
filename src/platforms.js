@@ -168,11 +168,31 @@ function parseHtml(document, html) {
   return container
 }
 
-function assertSemanticHtml(document, actualHtml, expectedHtml, name) {
+function semanticHtmlMatches(document, actualHtml, expectedHtml) {
   const actual = parseHtml(document, actualHtml)
   const expected = parseHtml(document, expectedHtml)
-  if (semanticSignature(actual) !== semanticSignature(expected)) {
+  return semanticSignature(actual) === semanticSignature(expected)
+}
+
+function assertSemanticHtml(document, actualHtml, expectedHtml, name) {
+  if (!semanticHtmlMatches(document, actualHtml, expectedHtml)) {
     throw new Error(`${name}编辑器改变了文章结构`)
+  }
+}
+
+async function undoUntilRestored(document, editor, previousHtml, name, maxAttempts = 5) {
+  const windowObject = document.defaultView
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (semanticHtmlMatches(document, editor.innerHTML, previousHtml)) return
+    if (!document.execCommand('undo', false)) break
+    editor.dispatchEvent(new windowObject.InputEvent('input', {
+      bubbles: true,
+      inputType: 'historyUndo',
+    }))
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+  }
+  if (!semanticHtmlMatches(document, editor.innerHTML, previousHtml)) {
+    throw new Error(`${name}正文 undo 未恢复`)
   }
 }
 
@@ -268,12 +288,254 @@ async function injectWechat(document, article) {
   }
 }
 
+function normalizedVisibleText(element) {
+  return (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function assertRichFidelity(document, actualElement, expectedHtml, name) {
+  const expected = parseHtml(document, expectedHtml)
+  const fields = [
+    ['正文文本', normalizedVisibleText(actualElement), normalizedVisibleText(expected)],
+    ['图片', actualElement.querySelectorAll('img').length, expected.querySelectorAll('img').length],
+    ['表格', actualElement.querySelectorAll('table').length, expected.querySelectorAll('table').length],
+    ['代码块', actualElement.querySelectorAll('pre').length, expected.querySelectorAll('pre').length],
+  ]
+  const changed = fields
+    .filter(([, actual, wanted]) => actual !== wanted)
+    .map(([label]) => label)
+  if (changed.length) {
+    throw new Error(`${name}编辑器改变了这些内容：${changed.join('、')}`)
+  }
+}
+
+function findBaijiahaoTitle(document) {
+  return queryFirst(document, [
+    '.client_components_titleInput [contenteditable="true"]',
+    '.client_pages_edit_components_titleInput [contenteditable="true"]',
+    '[class*="titleInput"] [contenteditable="true"]',
+  ])
+}
+
+async function injectBaijiahao(document, article) {
+  const windowObject = document.defaultView
+  const titleControl = findBaijiahaoTitle(document)
+  const editor = windowObject.UE_V2?.instants?.ueditorInstant0
+  if (!titleControl) throw new Error('百家号：未找到标题编辑器')
+  if (!editor || typeof editor.getContent !== 'function' || typeof editor.setContent !== 'function') {
+    throw new Error('百家号：未找到 UEditor 状态接口')
+  }
+
+  const previousTitle = readControlValue(titleControl)
+  const previousHtml = editor.getContent() ?? ''
+  if (previousTitle.trim() || hasMeaningfulEditorContent(parseHtml(document, previousHtml))) {
+    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
+  }
+
+  try {
+    editor.setContent(article.html)
+    editor.fireEvent?.('contentChange')
+    assertSemanticHtml(document, editor.getContent(), article.html, '百家号')
+    writeControl(windowObject, titleControl, article.title)
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+    if (readControlValue(titleControl) !== article.title) {
+      throw new Error('百家号：标题在写入后被改变')
+    }
+    assertSemanticHtml(document, editor.getContent(), article.html, '百家号')
+  } catch (error) {
+    try {
+      writeControl(windowObject, titleControl, previousTitle)
+      editor.setContent(previousHtml)
+      editor.fireEvent?.('contentChange')
+      await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+      if (readControlValue(titleControl) !== previousTitle) {
+        throw new Error('标题未恢复', { cause: error })
+      }
+      assertSemanticHtml(document, editor.getContent(), previousHtml, '百家号回滚后的')
+    } catch (rollbackError) {
+      throw new Error(
+        `百家号：写入失败且回滚未通过验证，请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+        { cause: rollbackError },
+      )
+    }
+    throw error
+  }
+  return { platformId: 'baijiahao', titleFilled: Boolean(article.title), bodyFilled: true, mode: 'html-api' }
+}
+
+function selectEditorEnd(windowObject, editor) {
+  const selection = windowObject.getSelection()
+  const range = windowObject.document.createRange()
+  range.selectNodeContents(editor)
+  range.collapse(false)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+async function injectToutiao(document, article) {
+  const windowObject = document.defaultView
+  const titleControl = document.querySelector('textarea[placeholder*="标题"]')
+  const editor = document.querySelector('.ProseMirror[contenteditable="true"], .ProseMirror')
+  if (!titleControl || !editor) throw new Error('今日头条：未找到标题或正文编辑器')
+  if (readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)) {
+    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
+  }
+  if (typeof document.execCommand !== 'function') {
+    throw new Error('今日头条：浏览器不支持 insertHTML 编辑命令')
+  }
+  const previousTitle = readControlValue(titleControl)
+  const previousHtml = editor.innerHTML
+  let bodyMutated = false
+  try {
+    editor.focus()
+    selectEditorEnd(windowObject, editor)
+    const accepted = Boolean(document.execCommand('insertHTML', false, article.html))
+    bodyMutated = !semanticHtmlMatches(document, editor.innerHTML, previousHtml)
+    if (!accepted || !bodyMutated) throw new Error('今日头条：编辑器拒绝 insertHTML')
+    editor.dispatchEvent(new windowObject.InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }))
+    editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
+    assertSemanticHtml(document, editor.innerHTML, article.html, '今日头条')
+    writeControl(windowObject, titleControl, article.title)
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+    if (readControlValue(titleControl) !== article.title) throw new Error('今日头条：标题在写入后被改变')
+    assertSemanticHtml(document, editor.innerHTML, article.html, '今日头条')
+  } catch (error) {
+    try {
+      writeControl(windowObject, titleControl, previousTitle)
+      if (bodyMutated || !semanticHtmlMatches(document, editor.innerHTML, previousHtml)) {
+        await undoUntilRestored(document, editor, previousHtml, '今日头条')
+      }
+      if (readControlValue(titleControl) !== previousTitle) throw new Error('标题未恢复', { cause: error })
+      assertSemanticHtml(document, editor.innerHTML, previousHtml, '今日头条回滚后的')
+    } catch (rollbackError) {
+      throw new Error(
+        `今日头条：写入失败且回滚未通过验证，请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+        { cause: rollbackError },
+      )
+    }
+    throw error
+  }
+  return { platformId: 'toutiao', titleFilled: Boolean(article.title), bodyFilled: true, mode: 'html-command' }
+}
+
+function isActionableButton(button) {
+  return (
+    !button.disabled
+    && !button.hidden
+    && button.getAttribute('aria-hidden') !== 'true'
+    && button.style.display !== 'none'
+  )
+}
+
+async function waitForButton(windowObject, predicate, timeoutMs, excluded = new Set()) {
+  const find = () => [...windowObject.document.querySelectorAll('button')].find((button) => (
+    !excluded.has(button)
+    && isActionableButton(button)
+    && predicate(button.textContent?.trim() ?? '')
+  ))
+  const immediate = find()
+  if (immediate) return immediate
+  return new Promise((resolve) => {
+    const observer = new windowObject.MutationObserver(() => {
+      const button = find()
+      if (button) {
+        observer.disconnect()
+        windowObject.clearTimeout(timer)
+        resolve(button)
+      }
+    })
+    observer.observe(windowObject.document.body, { childList: true, subtree: true })
+    const timer = windowObject.setTimeout(() => {
+      observer.disconnect()
+      resolve(find() ?? null)
+    }, timeoutMs)
+  })
+}
+
+async function injectZhihu(document, article, options) {
+  const windowObject = document.defaultView
+  const titleControl = queryFirst(document, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]'])
+  const editor = queryFirst(document, ['.public-DraftEditor-content[contenteditable="true"]', '.DraftEditor-root [contenteditable="true"]'])
+  if (!titleControl || !editor) throw new Error('知乎：未找到标题或正文编辑器')
+  if (readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)) {
+    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
+  }
+  if (!windowObject.DataTransfer || !windowObject.ClipboardEvent || typeof document.execCommand !== 'function') {
+    throw new Error('知乎：浏览器缺少 Markdown 粘贴或 undo 接口')
+  }
+  const previousTitle = readControlValue(titleControl)
+  const previousHtml = editor.innerHTML
+  let bodyMutated = false
+  try {
+    const transfer = new windowObject.DataTransfer()
+    transfer.setData('text/plain', article.portableMarkdown)
+    const buttonsBeforePaste = new Set(
+      [...document.querySelectorAll('button')].filter(isActionableButton),
+    )
+    editor.focus()
+    editor.dispatchEvent(new windowObject.ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: transfer,
+    }))
+    bodyMutated = hasMeaningfulEditorContent(editor)
+    if (!bodyMutated) throw new Error('知乎：编辑器没有接受 Markdown 粘贴')
+    const timeoutMs = options.waitTimeoutMs ?? 5000
+    const parseButton = await waitForButton(
+      windowObject,
+      (text) => text.includes('确认并解析'),
+      timeoutMs,
+      buttonsBeforePaste,
+    )
+    if (!parseButton) throw new Error('知乎：没有出现“确认并解析”')
+    const buttonsBeforeParse = new Set(
+      [...document.querySelectorAll('button')].filter(isActionableButton),
+    )
+    parseButton.click()
+    const confirmButton = await waitForButton(
+      windowObject,
+      (text) => text === '确认',
+      timeoutMs,
+      buttonsBeforeParse,
+    )
+    if (!confirmButton) throw new Error('知乎：没有出现解析后的“确认”')
+    confirmButton.click()
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+    assertRichFidelity(document, editor, article.html, '知乎')
+    writeControl(windowObject, titleControl, article.title)
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+    if (readControlValue(titleControl) !== article.title) throw new Error('知乎：标题在写入后被改变')
+    assertRichFidelity(document, editor, article.html, '知乎')
+  } catch (error) {
+    try {
+      writeControl(windowObject, titleControl, previousTitle)
+      if (bodyMutated || !semanticHtmlMatches(document, editor.innerHTML, previousHtml)) {
+        await undoUntilRestored(document, editor, previousHtml, '知乎')
+      }
+      if (readControlValue(titleControl) !== previousTitle) throw new Error('标题未恢复', { cause: error })
+      assertSemanticHtml(document, editor.innerHTML, previousHtml, '知乎回滚后的')
+    } catch (rollbackError) {
+      throw new Error(
+        `知乎：写入失败且回滚未通过验证，请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+        { cause: rollbackError },
+      )
+    }
+    throw error
+  }
+  return { platformId: 'zhihu', titleFilled: Boolean(article.title), bodyFilled: true, mode: 'markdown-import' }
+}
+
 const MARKDOWN_CONFIGS = {
   cnblogs: {
     id: 'cnblogs',
     name: '博客园',
     titleSelectors: ['#post-title', 'input[placeholder*="标题"]'],
     bodySelectors: ['#md-editor', 'textarea.not-resizable'],
+  },
+  csdn: {
+    id: 'csdn',
+    name: 'CSDN',
+    titleSelectors: ['.article-bar__title input', 'input[placeholder*="标题"]'],
+    bodySelectors: ['.editor__inner[contenteditable="true"]', '[contenteditable="true"].markdown-highlighting'],
   },
   oschina: {
     id: 'oschina',
@@ -308,12 +570,18 @@ export async function injectPlatformArticle(document, article, options = {}) {
   if (platform.id === 'wechat') {
     return injectWechat(document, article)
   }
+  if (platform.id === 'baijiahao') {
+    return injectBaijiahao(document, article)
+  }
+  if (platform.id === 'zhihu') {
+    return injectZhihu(document, article, options)
+  }
+  if (platform.id === 'toutiao') {
+    return injectToutiao(document, article)
+  }
   if (platform.id === 'sohu') {
     const result = await injectSohuArticle(document, article)
     return { platformId: 'sohu', ...result, mode: 'html-api' }
-  }
-  if (['csdn', 'zhihu', 'baijiahao', 'toutiao'].includes(platform.id)) {
-    throw new Error(`${platform.name}：当前缺少可验证平台状态的编辑器接口，待真实页面确认`)
   }
   throw new Error(`${platform.name}：尚未实现导入适配器`)
 }

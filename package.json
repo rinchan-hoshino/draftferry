@@ -1,7 +1,7 @@
 {
   "name": "draftferry-userscript",
-  "version": "0.2.0",
-  "description": "稿渡：识别八个内容平台，并在具备可验证编辑器边界的平台安全填入 Markdown",
+  "version": "0.3.0",
+  "description": "稿渡：为八个内容平台提供 Markdown 导入、Mermaid 转图和写入完整性检查",
   "scripts": {
     "test": "node --test",
     "build": "node scripts/build.js",

@@ -56,7 +56,7 @@ function createPanel() {
   panel.setAttribute('aria-label', '稿渡 · Markdown 一键排版 Preview')
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
-    <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 0.2 Preview` : '当前平台未支持'}</span>
+    <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 稿渡 Preview` : '当前平台未支持'}</span>
     <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden>
   `
   panel.setAttribute('style', [

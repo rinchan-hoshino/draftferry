@@ -10,7 +10,7 @@ const metadata = `// ==UserScript==
 // @name         稿渡 · Markdown 一键排版（Preview）
 // @namespace    k-neco.draftferry
 // @version      ${packageJson.version}
-// @description  识别八个平台；当前支持博客园、开源中国、微信公众号和搜狐号安全填入，其余平台仅提示待验证。
+// @description  为八个平台提供 Markdown 导入、Mermaid 转图和写入完整性检查；不会自动保存或发布。
 // @author       RinChan
 // @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
 // @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js

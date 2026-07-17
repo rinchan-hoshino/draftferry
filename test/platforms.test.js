@@ -67,18 +67,17 @@ test('博客园空白 Markdown 编辑器可填入且不点击保存发布', asyn
   assert.equal(clicks, 0)
 })
 
-test('CSDN contenteditable 没有可验证状态 API 时明确待现场', async () => {
+test('CSDN 空白 Markdown contenteditable 可填入', async () => {
   const page = dom(`
     <div class="article-bar__title"><input placeholder="标题"></div>
     <pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>
   `, 'https://editor.csdn.net/md/')
 
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /CSDN.*待真实页面/,
-  )
-  assert.equal(page.window.document.querySelector('input').value, '')
-  assert.equal(page.window.document.querySelector('pre').textContent, '')
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'csdn')
+  assert.equal(page.window.document.querySelector('input').value, article.title)
+  assert.equal(page.window.document.querySelector('pre').textContent, article.portableMarkdown)
 })
 
 test('开源中国在已切换的空白 Markdown textarea 中填入', async () => {
@@ -154,28 +153,29 @@ test('微信公众号 JSAPI 改坏结构时回滚并保留空白标题', async (
   assert.equal(calls, 2)
 })
 
-test('百家号标题没有可验证状态 API 时明确待现场', async () => {
+test('百家号通过 UEditor 和 contenteditable 标题填入', async () => {
   const page = dom(`
     <div class="client_components_titleInput"><div contenteditable="true"></div></div>
     <iframe></iframe>
   `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
   let currentHtml = '<p><br></p>'
+  let contentChanges = 0
   page.window.UE_V2 = {
     instants: {
       ueditorInstant0: {
         getContent: () => currentHtml,
         setContent: (html) => { currentHtml = html },
-        fireEvent() {},
+        fireEvent: () => { contentChanges += 1 },
       },
     },
   }
 
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /百家号.*待真实页面/,
-  )
-  assert.equal(currentHtml, '<p><br></p>')
-  assert.equal(page.window.document.querySelector('[contenteditable="true"]').textContent, '')
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'baijiahao')
+  assert.equal(currentHtml, article.html)
+  assert.equal(page.window.document.querySelector('[contenteditable="true"]').textContent, article.title)
+  assert.equal(contentChanges, 1)
 })
 
 test('Markdown 编辑器写入后被改坏时验证回滚状态', async () => {
@@ -199,35 +199,218 @@ test('Markdown 编辑器写入后被改坏时验证回滚状态', async () => {
   assert.equal(inputEvents, 2)
 })
 
-test('知乎和头条在没有可回滚编辑器 API 时明确待现场，不改页面', async () => {
-  const cases = [
-    [
-      'https://zhuanlan.zhihu.com/write',
-      '<textarea placeholder="请输入标题"></textarea><div class="public-DraftEditor-content" contenteditable="true"></div>',
-      '知乎',
-    ],
-    [
-      'https://mp.toutiao.com/profile_v4/graphic/publish',
-      '<textarea placeholder="请输入标题"></textarea><div class="ProseMirror"></div>',
-      '今日头条',
-    ],
-  ]
+test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="public-DraftEditor-content" contenteditable="true"></div>
+    <button id="save">保存</button><button id="publish">发布</button><button id="other-confirm">确认</button>
+  `, 'https://zhuanlan.zhihu.com/write')
+  const { window } = page
+  const editor = window.document.querySelector('[contenteditable="true"]')
+  let saveClicks = 0
+  window.document.querySelector('#save').onclick = () => { saveClicks += 1 }
+  window.document.querySelector('#publish').onclick = () => { saveClicks += 1 }
+  window.document.querySelector('#other-confirm').onclick = () => { saveClicks += 1 }
 
-  for (const [url, html, name] of cases) {
-    const page = dom(html, url)
-    await assert.rejects(
-      injectPlatformArticle(page.window.document, article),
-      new RegExp(`${name}.*待真实页面`),
-    )
-    assert.equal(page.window.document.querySelector('textarea').value, '')
-    assert.equal(page.window.document.querySelector('[contenteditable="true"], .ProseMirror').textContent, '')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
   }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    editor.textContent = event.clipboardData.getData('text/plain')
+    const parse = window.document.createElement('button')
+    parse.textContent = '确认并解析'
+    parse.onclick = () => {
+      editor.innerHTML = article.html
+      const confirm = window.document.createElement('button')
+      confirm.textContent = '确认'
+      window.document.body.append(confirm)
+    }
+    window.document.body.append(parse)
+  })
+  window.document.execCommand = (command) => {
+    if (command === 'undo') editor.innerHTML = ''
+    return true
+  }
+
+  const result = await injectPlatformArticle(window.document, article)
+
+  assert.equal(result.platformId, 'zhihu')
+  assert.equal(window.document.querySelector('textarea').value, article.title)
+  assert.equal(editor.querySelectorAll('img').length, 1)
+  assert.equal(saveClicks, 0)
+})
+
+test('今日头条通过 ProseMirror insertHTML 导入并保留结构', async () => {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="ProseMirror" contenteditable="true"></div>
+    <button id="save">保存</button><button id="publish">发布</button>
+  `, 'https://mp.toutiao.com/profile_v4/graphic/publish')
+  const { window } = page
+  const editor = window.document.querySelector('.ProseMirror')
+  let clicks = 0
+  window.document.querySelector('#save').onclick = () => { clicks += 1 }
+  window.document.querySelector('#publish').onclick = () => { clicks += 1 }
+  window.document.execCommand = (command, _showUi, value) => {
+    if (command === 'insertHTML') editor.innerHTML = value
+    if (command === 'undo') editor.innerHTML = ''
+    return true
+  }
+
+  const result = await injectPlatformArticle(window.document, article)
+
+  assert.equal(result.platformId, 'toutiao')
+  assert.equal(window.document.querySelector('textarea').value, article.title)
+  assert.equal(editor.querySelectorAll('img').length, 1)
+  assert.equal(clicks, 0)
+})
+
+test('CSDN 写入后被改坏时恢复空白编辑器', async () => {
+  const page = dom(`
+    <div class="article-bar__title"><input placeholder="标题"></div>
+    <pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>
+  `, 'https://editor.csdn.net/md/')
+  const editor = page.window.document.querySelector('pre')
+  let events = 0
+  editor.addEventListener('input', () => {
+    events += 1
+    if (events === 1) editor.textContent = '平台改坏的正文'
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(page.window.document, article),
+    /CSDN：编辑器在写入后改变了 Markdown/,
+  )
+  assert.equal(editor.textContent, '')
+  assert.equal(page.window.document.querySelector('input').value, '')
+  assert.equal(events, 2)
+})
+
+test('百家号正文被过滤时回滚 UEditor 和标题', async () => {
+  const page = dom(`
+    <div class="client_components_titleInput"><div contenteditable="true"></div></div>
+  `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
+  let currentHtml = '<p><br></p>'
+  let setCalls = 0
+  page.window.UE_V2 = {
+    instants: {
+      ueditorInstant0: {
+        getContent: () => currentHtml,
+        setContent(html) {
+          setCalls += 1
+          currentHtml = setCalls === 1 ? '<p>只留下文字</p>' : html
+        },
+        fireEvent() {},
+      },
+    },
+  }
+
+  await assert.rejects(
+    injectPlatformArticle(page.window.document, article),
+    /百家号编辑器改变了文章结构/,
+  )
+  assert.equal(currentHtml, '<p><br></p>')
+  assert.equal(page.window.document.querySelector('[contenteditable="true"]').textContent, '')
+  assert.equal(setCalls, 2)
+})
+
+test('知乎没有出现解析确认时执行 undo 并恢复标题', async () => {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="public-DraftEditor-content" contenteditable="true"></div>
+  `, 'https://zhuanlan.zhihu.com/write')
+  const { window } = page
+  const editor = window.document.querySelector('[contenteditable="true"]')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    editor.textContent = event.clipboardData.getData('text/plain')
+  })
+  let undoCalls = 0
+  window.document.execCommand = (command) => {
+    if (command === 'undo') {
+      undoCalls += 1
+      editor.innerHTML = ''
+    }
+    return true
+  }
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    /知乎：没有出现“确认并解析”/,
+  )
+  assert.equal(editor.textContent, '')
+  assert.equal(window.document.querySelector('textarea').value, '')
+  assert.equal(undoCalls, 1)
+})
+
+test('今日头条结构被改变时 undo 回滚正文和标题', async () => {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="ProseMirror" contenteditable="true"></div>
+  `, 'https://mp.toutiao.com/profile_v4/graphic/publish')
+  const { window } = page
+  const editor = window.document.querySelector('.ProseMirror')
+  let undoCalls = 0
+  window.document.execCommand = (command) => {
+    if (command === 'insertHTML') editor.innerHTML = '<p>只留下文字</p>'
+    if (command === 'undo') {
+      undoCalls += 1
+      editor.innerHTML = ''
+    }
+    return true
+  }
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article),
+    /今日头条编辑器改变了文章结构/,
+  )
+  assert.equal(editor.innerHTML, '')
+  assert.equal(window.document.querySelector('textarea').value, '')
+  assert.equal(undoCalls, 1)
 })
 
 test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () => {
+  const baijiahao = dom(`
+    <div class="client_components_titleInput"><div contenteditable="true"></div></div>
+  `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
+  baijiahao.window.UE_V2 = {
+    instants: {
+      ueditorInstant0: {
+        getContent: () => '<p>已有正文</p>',
+        setContent() {},
+      },
+    },
+  }
   const pages = [
     dom('<input id="post-title" value="已有标题"><textarea id="md-editor"></textarea>', 'https://i.cnblogs.com/posts/edit'),
+    dom('<div class="article-bar__title"><input></div><pre class="editor__inner" contenteditable="true">已有正文</pre>', 'https://editor.csdn.net/md/'),
+    dom('<textarea placeholder="标题">已有标题</textarea><div class="public-DraftEditor-content" contenteditable="true"></div>', 'https://zhuanlan.zhihu.com/write'),
+    dom('<textarea id="title">已有标题</textarea><div class="ProseMirror"><p><br></p></div>', 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2'),
     dom('<input placeholder="标题"><textarea>已有正文</textarea>', 'https://my.oschina.net/u/1/blog/ai-write'),
+    baijiahao,
+    dom('<textarea placeholder="标题"></textarea><div class="ProseMirror">已有正文</div>', 'https://mp.toutiao.com/profile_v4/graphic/publish'),
   ]
 
   for (const page of pages) {
