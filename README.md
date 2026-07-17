@@ -9,9 +9,9 @@
 - 产品名：稿渡
 - 英文与技术标识：DraftFerry
 - 油猴安装文件：`draftferry.user.js`
-- 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`（完成生产切换后启用）
+- 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前 `0.2.0` 是本地候选，线上仍为旧的搜狐单平台 `0.1.0`。
+产品名和链接不再随平台数量变化。当前线上版本为 `0.2.0`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
@@ -28,12 +28,12 @@
 
 阿里云、腾讯云不在当前范围内。
 
-## 安装候选
+## 安装
 
 1. 安装 Tampermonkey 5.3 或更高版本。
 2. Chrome 138+：在 Tampermonkey 扩展详情中启用“允许用户脚本”；若没有该开关，则在扩展管理页启用“开发者模式”。
-3. 在 Tampermonkey 中导入本地构建产物 `dist/draftferry.user.js`。
-4. 核对安装页只申请上表八个平台对应的文章编辑页，没有 `<all_urls>`。
+3. 打开 `https://acv.k-neco.com/tools/draftferry.user.js`，由 Tampermonkey 接管并显示安装页。
+4. 核对安装页名称为“稿渡 · Markdown 一键排版（Preview）”，且只申请上表八个平台对应的文章编辑页，没有 `<all_urls>`，然后点击安装。
 
 ## 使用
 
