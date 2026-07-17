@@ -329,21 +329,26 @@ test('知乎解析后丢失 Mermaid 图片来源时回滚', async () => {
   assert.equal(window.document.querySelector('textarea').value, '')
 })
 
-test('知乎解析后替换 Mermaid data URL 时回滚', async () => {
-  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
-    body.innerHTML = article.html
-    body.querySelector('img').setAttribute('src', 'data:image/png;base64,eQ==')
-    parse.remove()
-    const confirm = dialog.ownerDocument.createElement('button')
-    confirm.textContent = '确认'
-    dialog.append(confirm)
-  })
+test('知乎解析后把 Mermaid 图片替换成错误 data URL 或远程 URL 时回滚', async () => {
+  for (const replacement of [
+    'data:image/png;base64,eQ==',
+    'https://wrong.example/mermaid.png',
+  ]) {
+    const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
+      body.innerHTML = article.html
+      body.querySelector('img').setAttribute('src', replacement)
+      parse.remove()
+      const confirm = dialog.ownerDocument.createElement('button')
+      confirm.textContent = '确认'
+      dialog.append(confirm)
+    })
 
-  await assert.rejects(
-    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
-    /知乎编辑器改变了这些内容：图片/,
-  )
-  assert.equal(editor.innerHTML, '')
+    await assert.rejects(
+      injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+      /知乎编辑器改变了这些内容：图片/,
+    )
+    assert.equal(editor.innerHTML, '')
+  }
 })
 
 test('知乎解析后改变表格拓扑和代码内容时回滚', async () => {

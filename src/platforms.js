@@ -321,11 +321,8 @@ function imagesMatch(actualElement, expectedElement) {
     const actualSrc = actual.getAttribute('src') ?? ''
     const expectedSrc = expected.getAttribute('src') ?? ''
     if (!safeImageSource(actualSrc)) return false
-    if ((actual.getAttribute('alt') ?? '') !== (expected.getAttribute('alt') ?? '')) return false
-    if (actualSrc.startsWith('data:image/') && expectedSrc.startsWith('data:image/')) {
-      return actualSrc === expectedSrc
-    }
-    return true
+    if (actualSrc !== expectedSrc) return false
+    return (actual.getAttribute('alt') ?? '') === (expected.getAttribute('alt') ?? '')
   })
 }
 
