@@ -4,6 +4,8 @@
 // @version      0.2.0
 // @description  识别八个平台；当前支持博客园、开源中国、微信公众号和搜狐号安全填入，其余平台仅提示待验证。
 // @author       RinChan
+// @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
+// @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js
 // @match        https://i.cnblogs.com/posts/edit*
 // @match        https://editor.csdn.net/md/*
 // @match        https://zhuanlan.zhihu.com/write*

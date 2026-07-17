@@ -19,6 +19,11 @@ assert.match(
   artifact,
   /\/\/ @description\s+识别八个平台；当前支持博客园、开源中国、微信公众号和搜狐号安全填入，其余平台仅提示待验证。/,
 )
+const canonicalUrl = 'https://acv.k-neco.com/tools/draftferry.user.js'
+assert.ok(artifact.includes(`// @updateURL    ${canonicalUrl}`))
+assert.ok(artifact.includes(`// @downloadURL  ${canonicalUrl}`))
+assert.equal((artifact.match(/^\/\/ @updateURL\s+/gm) ?? []).length, 1)
+assert.equal((artifact.match(/^\/\/ @downloadURL\s+/gm) ?? []).length, 1)
 const expectedMatches = [
   'https://i.cnblogs.com/posts/edit*',
   'https://editor.csdn.net/md/*',
