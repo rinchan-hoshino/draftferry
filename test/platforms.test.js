@@ -18,6 +18,43 @@ function dom(html, url) {
   return new JSDOM(html, { url })
 }
 
+function zhihuFixture(onParse) {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="public-DraftEditor-content" contenteditable="true"></div>
+  `, 'https://zhuanlan.zhihu.com/write')
+  const { window } = page
+  const editor = window.document.querySelector('[contenteditable="true"]')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    editor.textContent = event.clipboardData.getData('text/plain')
+    const dialog = window.document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    const parse = window.document.createElement('button')
+    parse.textContent = '确认并解析'
+    parse.onclick = () => onParse({ window, editor, dialog, parse })
+    dialog.append(parse)
+    window.document.body.append(dialog)
+  })
+  window.document.execCommand = (command) => {
+    if (command === 'undo') editor.innerHTML = ''
+    return true
+  }
+  return { page, window, editor }
+}
+
 test('只注册已确认的八个平台', () => {
   assert.deepEqual(PLATFORM_IDS, [
     'cnblogs',
@@ -227,15 +264,19 @@ test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
   window.ClipboardEvent = FakeClipboardEvent
   editor.addEventListener('paste', (event) => {
     editor.textContent = event.clipboardData.getData('text/plain')
+    const dialog = window.document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
     const parse = window.document.createElement('button')
     parse.textContent = '确认并解析'
     parse.onclick = () => {
       editor.innerHTML = article.html
+      parse.remove()
       const confirm = window.document.createElement('button')
       confirm.textContent = '确认'
-      window.document.body.append(confirm)
+      dialog.append(confirm)
     }
-    window.document.body.append(parse)
+    dialog.append(parse)
+    window.document.body.append(dialog)
   })
   window.document.execCommand = (command) => {
     if (command === 'undo') editor.innerHTML = ''
@@ -248,6 +289,87 @@ test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
   assert.equal(window.document.querySelector('textarea').value, article.title)
   assert.equal(editor.querySelectorAll('img').length, 1)
   assert.equal(saveClicks, 0)
+})
+
+test('知乎不会点击解析弹窗外新出现的无关确认按钮', async () => {
+  let unrelatedClicks = 0
+  const { window, editor } = zhihuFixture(({ window: pageWindow, editor: body, parse }) => {
+    body.innerHTML = article.html
+    parse.remove()
+    const unrelated = pageWindow.document.createElement('button')
+    unrelated.textContent = '确认'
+    unrelated.onclick = () => { unrelatedClicks += 1 }
+    pageWindow.document.body.append(unrelated)
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    /知乎：没有出现解析后的“确认”/,
+  )
+  assert.equal(unrelatedClicks, 0)
+  assert.equal(editor.innerHTML, '')
+  assert.equal(window.document.querySelector('textarea').value, '')
+})
+
+test('知乎解析后丢失 Mermaid 图片来源时回滚', async () => {
+  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
+    body.innerHTML = article.html
+    body.querySelector('img').removeAttribute('src')
+    parse.remove()
+    const confirm = dialog.ownerDocument.createElement('button')
+    confirm.textContent = '确认'
+    dialog.append(confirm)
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    /知乎编辑器改变了这些内容：图片/,
+  )
+  assert.equal(editor.innerHTML, '')
+  assert.equal(window.document.querySelector('textarea').value, '')
+})
+
+test('知乎解析后替换 Mermaid data URL 时回滚', async () => {
+  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
+    body.innerHTML = article.html
+    body.querySelector('img').setAttribute('src', 'data:image/png;base64,eQ==')
+    parse.remove()
+    const confirm = dialog.ownerDocument.createElement('button')
+    confirm.textContent = '确认'
+    dialog.append(confirm)
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    /知乎编辑器改变了这些内容：图片/,
+  )
+  assert.equal(editor.innerHTML, '')
+})
+
+test('知乎解析后改变表格拓扑和代码内容时回滚', async () => {
+  const richArticle = {
+    title: '结构测试',
+    html: '<table><thead><tr><th>列</th></tr></thead><tbody><tr><td>值</td></tr></tbody></table><pre><code>line 1\n  line 2</code></pre>',
+    portableMarkdown: '| 列 |\n| --- |\n| 值 |\n\n```text\nline 1\n  line 2\n```',
+  }
+  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
+    body.innerHTML = richArticle.html
+    const heading = body.querySelector('th')
+    const plainCell = heading.ownerDocument.createElement('td')
+    plainCell.textContent = heading.textContent
+    heading.replaceWith(plainCell)
+    body.querySelector('code').textContent = 'line 1 line 2'
+    parse.remove()
+    const confirm = dialog.ownerDocument.createElement('button')
+    confirm.textContent = '确认'
+    dialog.append(confirm)
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, richArticle, { waitTimeoutMs: 20 }),
+    /表格、代码块/,
+  )
+  assert.equal(editor.innerHTML, '')
 })
 
 test('今日头条通过 ProseMirror insertHTML 导入并保留结构', async () => {
@@ -405,7 +527,7 @@ test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () =>
   }
   const pages = [
     dom('<input id="post-title" value="已有标题"><textarea id="md-editor"></textarea>', 'https://i.cnblogs.com/posts/edit'),
-    dom('<div class="article-bar__title"><input></div><pre class="editor__inner" contenteditable="true">已有正文</pre>', 'https://editor.csdn.net/md/'),
+    dom('<div class="article-bar__title"><input></div><pre class="editor__inner" contenteditable="true"><img src="existing.png"></pre>', 'https://editor.csdn.net/md/'),
     dom('<textarea placeholder="标题">已有标题</textarea><div class="public-DraftEditor-content" contenteditable="true"></div>', 'https://zhuanlan.zhihu.com/write'),
     dom('<textarea id="title">已有标题</textarea><div class="ProseMirror"><p><br></p></div>', 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2'),
     dom('<input placeholder="标题"><textarea>已有正文</textarea>', 'https://my.oschina.net/u/1/blog/ai-write'),

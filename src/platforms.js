@@ -102,7 +102,10 @@ function writeBodyValue(windowObject, editor, value, notify = true) {
 }
 
 function assertBlankTextEditor(titleControl, bodyEditor) {
-  if (readControlValue(titleControl).trim() || readBodyValue(bodyEditor).trim()) {
+  const bodyHasContent = 'value' in bodyEditor
+    ? readBodyValue(bodyEditor).trim() !== ''
+    : hasMeaningfulEditorContent(bodyEditor)
+  if (readControlValue(titleControl).trim() || bodyHasContent) {
     throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
   }
 }
@@ -292,13 +295,68 @@ function normalizedVisibleText(element) {
   return (element.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+function linearContent(element) {
+  const clone = element.cloneNode(true)
+  for (const image of clone.querySelectorAll('img')) {
+    image.replaceWith(`⟦图片:${image.getAttribute('alt') ?? ''}⟧`)
+  }
+  return normalizedVisibleText(clone)
+}
+
+function safeImageSource(src) {
+  return (
+    src.startsWith('data:image/')
+    || src.startsWith('blob:')
+    || src.startsWith('https://')
+    || src.startsWith('http://')
+  )
+}
+
+function imagesMatch(actualElement, expectedElement) {
+  const actualImages = [...actualElement.querySelectorAll('img')]
+  const expectedImages = [...expectedElement.querySelectorAll('img')]
+  if (actualImages.length !== expectedImages.length) return false
+  return actualImages.every((actual, index) => {
+    const expected = expectedImages[index]
+    const actualSrc = actual.getAttribute('src') ?? ''
+    const expectedSrc = expected.getAttribute('src') ?? ''
+    if (!safeImageSource(actualSrc)) return false
+    if ((actual.getAttribute('alt') ?? '') !== (expected.getAttribute('alt') ?? '')) return false
+    if (actualSrc.startsWith('data:image/') && expectedSrc.startsWith('data:image/')) {
+      return actualSrc === expectedSrc
+    }
+    return true
+  })
+}
+
+function tableTopology(element) {
+  return [...element.querySelectorAll('table')].map((table) => (
+    [...table.rows].map((row) => (
+      [...row.cells].map((cell) => ({
+        tag: cell.tagName.toLowerCase(),
+        colspan: cell.colSpan,
+        rowspan: cell.rowSpan,
+        text: normalizedVisibleText(cell),
+      }))
+    ))
+  ))
+}
+
+function codeBlocks(element) {
+  return [...element.querySelectorAll('pre')].map((block) => (
+    (block.textContent ?? '').replace(/\r\n?/g, '\n')
+  ))
+}
+
 function assertRichFidelity(document, actualElement, expectedHtml, name) {
   const expected = parseHtml(document, expectedHtml)
   const fields = [
-    ['正文文本', normalizedVisibleText(actualElement), normalizedVisibleText(expected)],
-    ['图片', actualElement.querySelectorAll('img').length, expected.querySelectorAll('img').length],
-    ['表格', actualElement.querySelectorAll('table').length, expected.querySelectorAll('table').length],
-    ['代码块', actualElement.querySelectorAll('pre').length, expected.querySelectorAll('pre').length],
+    ['正文文本与节点顺序', linearContent(actualElement), linearContent(expected)],
+    ['图片', imagesMatch(actualElement, expected), true],
+    ['表格', JSON.stringify(tableTopology(actualElement)), JSON.stringify(tableTopology(expected))],
+    ['代码块', JSON.stringify(codeBlocks(actualElement)), JSON.stringify(codeBlocks(expected))],
+    ['列表', actualElement.querySelectorAll('ul, ol').length, expected.querySelectorAll('ul, ol').length],
+    ['引用', actualElement.querySelectorAll('blockquote').length, expected.querySelectorAll('blockquote').length],
   ]
   const changed = fields
     .filter(([, actual, wanted]) => actual !== wanted)
@@ -426,8 +484,14 @@ function isActionableButton(button) {
   )
 }
 
-async function waitForButton(windowObject, predicate, timeoutMs, excluded = new Set()) {
-  const find = () => [...windowObject.document.querySelectorAll('button')].find((button) => (
+async function waitForButton(
+  windowObject,
+  predicate,
+  timeoutMs,
+  excluded = new Set(),
+  root = windowObject.document,
+) {
+  const find = () => [...root.querySelectorAll('button')].find((button) => (
     !excluded.has(button)
     && isActionableButton(button)
     && predicate(button.textContent?.trim() ?? '')
@@ -443,7 +507,7 @@ async function waitForButton(windowObject, predicate, timeoutMs, excluded = new 
         resolve(button)
       }
     })
-    observer.observe(windowObject.document.body, { childList: true, subtree: true })
+    observer.observe(root, { childList: true, subtree: true })
     const timer = windowObject.setTimeout(() => {
       observer.disconnect()
       resolve(find() ?? null)
@@ -487,8 +551,19 @@ async function injectZhihu(document, article, options) {
       buttonsBeforePaste,
     )
     if (!parseButton) throw new Error('知乎：没有出现“确认并解析”')
+    const parseDialog = parseButton.closest([
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '.Modal-wrapper',
+      '.Modal',
+      '[class*="Modal"]',
+      '[class*="modal"]',
+      '[class*="Dialog"]',
+      '[class*="dialog"]',
+    ].join(', '))
+    if (!parseDialog) throw new Error('知乎：无法确认 Markdown 解析弹窗边界')
     const buttonsBeforeParse = new Set(
-      [...document.querySelectorAll('button')].filter(isActionableButton),
+      [...parseDialog.querySelectorAll('button')].filter(isActionableButton),
     )
     parseButton.click()
     const confirmButton = await waitForButton(
@@ -496,6 +571,7 @@ async function injectZhihu(document, article, options) {
       (text) => text === '确认',
       timeoutMs,
       buttonsBeforeParse,
+      parseDialog,
     )
     if (!confirmButton) throw new Error('知乎：没有出现解析后的“确认”')
     confirmButton.click()
