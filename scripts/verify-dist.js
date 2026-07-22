@@ -17,7 +17,7 @@ assert.match(artifact, /\/\/ @namespace\s+k-neco\.draftferry/)
 assert.match(artifact, new RegExp(`// @version\\s+${packageJson.version}`))
 assert.match(
   artifact,
-  /\/\/ @description\s+为八个平台提供 Markdown 导入、Mermaid 转图和写入完整性检查；不会自动保存或发布。/,
+  /\/\/ @description\s+为八个平台提供 Markdown 导入和 Mermaid 转图；不会自动保存或发布。/,
 )
 const canonicalUrl = 'https://acv.k-neco.com/tools/draftferry.user.js'
 assert.ok(artifact.includes(`// @updateURL    ${canonicalUrl}`))

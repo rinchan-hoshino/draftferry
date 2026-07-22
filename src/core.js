@@ -223,141 +223,6 @@ export function hasExistingSohuDraft(document) {
   return Boolean(title || hasMeaningfulEditorContent(editor))
 }
 
-const CANONICAL_TAGS = new Set([
-  'a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4',
-  'h5', 'h6', 'hr', 'img', 'li', 'ol', 'p', 'pre', 'strong', 'table',
-  'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
-])
-
-function normalizeText(text) {
-  return text.replace(/\s+/g, ' ')
-}
-
-const STRUCTURAL_WHITESPACE_PARENTS = new Set([
-  'root', 'table', 'tbody', 'tfoot', 'thead', 'tr', 'ul', 'ol',
-])
-const TRIM_OUTER_TEXT_PARENTS = new Set([
-  'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p', 'td', 'th',
-])
-
-function isTextSignature(signature) {
-  return signature?.[0] === 'text'
-}
-
-function normalizeSemanticChildren(children, parentTag) {
-  let normalized = children.map((child) => (
-    isTextSignature(child) ? ['text', child[1]] : child
-  ))
-  if (STRUCTURAL_WHITESPACE_PARENTS.has(parentTag)) {
-    normalized = normalized.filter((child) => (
-      !isTextSignature(child) || child[1].trim()
-    ))
-  }
-  if (TRIM_OUTER_TEXT_PARENTS.has(parentTag) && normalized.length) {
-    if (isTextSignature(normalized[0])) {
-      normalized[0][1] = normalized[0][1].trimStart()
-    }
-    const last = normalized.at(-1)
-    if (isTextSignature(last)) {
-      last[1] = last[1].trimEnd()
-    }
-  }
-  return normalized.filter((child) => (
-    !isTextSignature(child) || child[1] !== ''
-  ))
-}
-
-function canonicalTagName(element) {
-  const tagName = element.tagName.toLowerCase()
-  return { b: 'strong', i: 'em', s: 'del', strike: 'del' }[tagName] ?? tagName
-}
-
-function normalizedStyle(element) {
-  return Array.from(
-    { length: element.style.length },
-    (_unused, index) => element.style.item(index),
-  ).map((property) => [
-      property,
-      element.style.getPropertyValue(property).trim(),
-      element.style.getPropertyPriority(property),
-    ])
-    .sort(([left], [right]) => left.localeCompare(right))
-}
-
-function semanticAttributes(element, tagName) {
-  const names = new Set(['dir'])
-  const byTag = {
-    a: ['href'],
-    blockquote: ['cite'],
-    img: ['src', 'alt', 'width', 'height'],
-    li: ['value'],
-    ol: ['start', 'reversed', 'type'],
-    td: ['colspan', 'rowspan'],
-    th: ['colspan', 'rowspan', 'scope'],
-  }
-  for (const name of byTag[tagName] ?? []) {
-    names.add(name)
-  }
-  const attributes = [...names]
-    .filter((name) => element.hasAttribute(name))
-    .map((name) => [name, element.getAttribute(name)])
-    .sort(([left], [right]) => left.localeCompare(right))
-  const style = normalizedStyle(element)
-  if (style.length) {
-    attributes.push(['style', style])
-  }
-  return attributes
-}
-
-function semanticNode(node, preserveWhitespace = false) {
-  if (node.nodeType === node.TEXT_NODE) {
-    const rawText = (node.textContent ?? '').replaceAll('\r\n', '\n')
-    const text = preserveWhitespace ? rawText : normalizeText(rawText)
-    return text ? ['text', text] : null
-  }
-  if (node.nodeType !== node.ELEMENT_NODE) {
-    return null
-  }
-
-  const tagName = canonicalTagName(node)
-  const preserveChildrenWhitespace = preserveWhitespace || tagName === 'pre' || tagName === 'code'
-  const attributes = semanticAttributes(node, tagName)
-  const children = normalizeSemanticChildren(
-    [...node.childNodes]
-      .map((child) => semanticNode(child, preserveChildrenWhitespace))
-      .filter(Boolean),
-    tagName,
-  )
-  if (tagName === 'img') {
-    return ['img', attributes]
-  }
-  if (tagName === 'a') {
-    return ['a', attributes, children]
-  }
-  if (tagName === 'p' && children.length === 1 && children[0][0] === 'img') {
-    return children[0]
-  }
-  if (!CANONICAL_TAGS.has(tagName)) {
-    return children
-  }
-  return [tagName, attributes, children]
-}
-
-export function semanticSignature(container) {
-  return JSON.stringify(normalizeSemanticChildren(
-    [...container.childNodes].map(semanticNode).filter(Boolean),
-    'root',
-  ))
-}
-
-function assertEditorAcceptedArticle(document, editor, expectedHtml) {
-  const expectedContainer = document.createElement('div')
-  expectedContainer.innerHTML = expectedHtml
-  if (semanticSignature(editor) !== semanticSignature(expectedContainer)) {
-    throw new Error('搜狐编辑器改变了文章结构、顺序或图片内容')
-  }
-}
-
 function getSohuQuill(windowObject, editor) {
   const container = editor.closest('.ql-container')
   const quill = container && windowObject.Quill?.find?.(container)
@@ -415,27 +280,11 @@ export async function injectSohuArticle(document, article) {
   const quill = getSohuQuill(windowObject, editor)
   const previousDelta = cloneDelta(windowObject, quill.getContents())
   const previousTitle = titleInput.value
-  const previousHtml = editor.innerHTML
   try {
     editor.focus()
     quill.clipboard.dangerouslyPasteHTML(article.html, 'user')
-
-    if (!hasMeaningfulEditorContent(editor)) {
-      throw new Error('搜狐编辑器没有接受转换后的内容')
-    }
-    assertEditorAcceptedArticle(document, editor, article.html)
-
     if (article.title) {
       setInputValue(windowObject, titleInput, article.title)
-    }
-    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-    if (article.title && titleInput.value !== article.title) {
-      throw new Error('搜狐在写入后改变了标题或正文')
-    }
-    try {
-      assertEditorAcceptedArticle(document, editor, article.html)
-    } catch {
-      throw new Error('搜狐在写入后改变了标题或正文')
     }
   } catch (error) {
     try {
@@ -443,17 +292,9 @@ export async function injectSohuArticle(document, article) {
         setInputValue(windowObject, titleInput, previousTitle)
       }
       quill.setContents(previousDelta, 'user')
-      await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-      if (
-        titleInput.value !== previousTitle
-        || JSON.stringify(quill.getContents()) !== JSON.stringify(previousDelta)
-      ) {
-        throw new Error('标题或 Quill Delta 未恢复', { cause: error })
-      }
-      assertEditorAcceptedArticle(document, editor, previousHtml)
     } catch (rollbackError) {
       throw new Error(
-        `搜狐：写入失败且回滚未通过验证，请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+        `搜狐：写入失败且无法恢复原内容；原错误：${error instanceof Error ? error.message : String(error)}`,
         { cause: rollbackError },
       )
     }

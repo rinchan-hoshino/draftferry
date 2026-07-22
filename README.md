@@ -1,6 +1,6 @@
 # 稿渡（DraftFerry）
 
-**Markdown 一键排版 Preview**。稿渡为八个内容平台提供实际导入逻辑，将 Markdown、本地图片和 Mermaid PNG 转成目标编辑器可接收的格式，并在写入后检查标题、正文和关键结构。
+**Markdown 一键排版 Preview**。稿渡为八个内容平台提供实际导入逻辑，将 Markdown、本地图片和 Mermaid PNG 转成目标编辑器可接收的格式。平台接管内容后可能自行调整格式，稿渡不再做写入后二次校验。
 
 稿渡**不会**自动保存或发布，也不会读取、导出登录凭据。
 
@@ -11,20 +11,20 @@
 - 油猴安装文件：`draftferry.user.js`
 - 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前版本为 `0.3.1`；Tampermonkey 的更新与下载地址都固定到上述链接。
+产品名和链接不再随平台数量变化。当前版本为 `0.3.2`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
-| 平台 | 0.3.1 Preview 导入方式 |
+| 平台 | 0.3.2 Preview 导入方式 |
 | --- | --- |
 | 博客园 | 向空白 Markdown textarea 填入可移植 Markdown |
-| CSDN | 向空白 Markdown contenteditable 填入可移植 Markdown，并验证最终文本 |
-| 知乎 | 粘贴可移植 Markdown，完成“确认并解析”和“确认”，再检查正文/图片/表格/代码块 |
-| 微信公众号 | 使用 `mp_editor_set_content` 填入富文本并验证回滚 |
+| CSDN | 向空白 Markdown contenteditable 填入可移植 Markdown |
+| 知乎 | 粘贴可移植 Markdown，完成“确认并解析”和“确认” |
+| 微信公众号 | 使用 `mp_editor_set_content` 填入富文本 |
 | 开源中国 | 用户先手动切到 MD 编辑器，再填入可移植 Markdown |
-| 百家号 | 使用 UEditor 填入正文，通过 contenteditable 填入标题，并验证最终内容 |
-| 今日头条 | 通过 ProseMirror `insertHTML` 填入富文本并验证结构与 undo 回滚 |
-| 搜狐号 | 使用 Quill `getContents/setContents` 填入并验证回滚 |
+| 百家号 | 使用 UEditor 填入正文，通过 contenteditable 填入标题 |
+| 今日头条 | 通过 ProseMirror `insertHTML` 填入富文本 |
+| 搜狐号 | 使用 Quill 填入富文本 |
 
 表中八项均已有可执行适配器和本地页面夹具，不再把占位报错算作适配；真实登录页面兼容性和保存结果仍须逐站验收。
 
@@ -53,10 +53,11 @@
 - 第一处一级标题作为平台标题，不重复放进正文；
 - Mermaid 代码块转换成白底 PNG；
 - 原始 Markdown 内嵌 HTML 先由 DOMPurify 清理；
-- 富文本平台接收带内联样式的 HTML，并校验结构、样式、图片与有语义属性；
+- 富文本平台接收带内联样式的 HTML；
 - Markdown 平台接收由清理后 HTML 重新生成的 GFM Markdown；
 - Mermaid 与本地图片在 Markdown 中使用 PNG data URL，平台是否接受仍需现场验证；
-- 写入失败时验证回滚结果；无法验证平台状态时不改动页面。
+- 平台写入接口返回后即视为导入完成，不比较平台最终生成的 HTML、样式或结构；
+- 标题或正文非空时仍拒绝覆盖，稿渡仍不自动保存或发布。
 
 ## 开发与验证
 

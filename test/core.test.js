@@ -162,162 +162,26 @@ test('找不到真实 Quill 实例时在改动前失败', async () => {
   assert.equal(dom.window.document.querySelector('input').value, '')
 })
 
-test('搜狐只接受部分结构时拒绝误报成功并恢复 Quill Delta', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  const editor = window.document.querySelector('.ql-editor')
-  const fake = installFakeQuill(window, () => '<p>正文</p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '不应写入标题',
-      html: '<p>正文</p><table><tbody><tr><td>表格</td></tr></tbody></table><img alt="图" src="data:image/png;base64,eA==">',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-  assert.equal(editor.innerHTML, '<p><br></p>')
-  assert.equal(fake.getRestoreCalls(), 1)
-  assert.deepEqual(fake.getRestoreSources(), ['user'])
-  assert.deepEqual(fake.quill.getContents(), { ops: [{ insert: '\n' }] })
-  assert.equal(window.document.querySelector('input').value, '')
-})
-
-test('结构数量和全文相同但节点语义改变时仍拒绝', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<h2>AB</h2><p></p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<h2>A</h2><p>B</p>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('表头被改成普通表格正文时拒绝', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<table><tbody><tr><th>标题</th></tr></tbody></table>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<table><thead><tr><th>标题</th></tr></thead></table>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('代码块缩进或换行被改变时拒绝', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<pre><code>if (ok) { return 1 }</code></pre>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<pre><code>if (ok) {\n  return 1\n}</code></pre>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('富文本样式被剥离时拒绝误报成功', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<h2>标题</h2><p>正文</p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<h2 style="font-size:22px">标题</h2><p style="line-height:1.75">正文</p>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('等价但声明顺序不同的样式仍可通过', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<p style="font-size:16px;color:red">正文</p>')
-
-  await injectSohuArticle(window.document, {
-    title: '',
-    html: '<p style="color:red;font-size:16px">正文</p>',
-  })
-})
-
-test('列表起始值或表格跨列被改变时拒绝', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<ol><li>第三项</li></ol><table><tbody><tr><td>跨列</td></tr></tbody></table>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<ol start="3"><li value="3">第三项</li></ol><table><tbody><tr><td colspan="2">跨列</td></tr></tbody></table>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('行内节点两侧空格丢失时拒绝误报成功', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<p>A<strong>B</strong>C</p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<p>A <strong>B</strong> C</p>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('图片来源或替代文字被改写时拒绝误报成功', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  installFakeQuill(window, () => '<p><img alt="错误图片" src="data:image/png;base64,eQ=="></p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '',
-      html: '<p><img alt="正确图片" src="data:image/png;base64,eA=="></p>',
-    }),
-    /搜狐编辑器改变了文章结构/,
-  )
-})
-
-test('标题事件改写标题或正文时回滚整个导入', async () => {
+test('搜狐接受平台对写入结果的改写且不回滚', async () => {
   const dom = createSohuDom()
   const { window } = dom
   const editor = window.document.querySelector('.ql-editor')
   const title = window.document.querySelector('input')
-  const fake = installFakeQuill(window)
-  let titleInputEvents = 0
+  const fake = installFakeQuill(window, () => '<p>平台保留的正文</p>')
   title.addEventListener('input', () => {
-    titleInputEvents += 1
-    if (titleInputEvents === 1) {
-      title.value = '被搜狐改写'
-      editor.innerHTML = '<p>被搜狐改写</p>'
-    }
+    title.value = '平台保留的标题'
+    editor.innerHTML = '<p>平台二次改写的正文</p>'
   })
 
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '预期标题',
-      html: '<p>预期正文</p>',
-    }),
-    /搜狐在写入后改变了标题或正文/,
-  )
-  assert.equal(fake.getRestoreCalls(), 1)
-  assert.deepEqual(fake.getRestoreSources(), ['user'])
-  assert.deepEqual(fake.quill.getContents(), { ops: [{ insert: '\n' }] })
-  assert.equal(title.value, '')
-  assert.equal(titleInputEvents, 2)
+  const result = await injectSohuArticle(window.document, {
+    title: '原始标题',
+    html: '<p>原始正文</p><img alt="图" src="data:image/png;base64,eA==">',
+  })
+
+  assert.equal(result.titleFilled, true)
+  assert.equal(title.value, '平台保留的标题')
+  assert.equal(editor.innerHTML, '<p>平台二次改写的正文</p>')
+  assert.equal(fake.getRestoreCalls(), 0)
 })
 
 test('标题写入异常时恢复 Quill Delta 和原标题', async () => {

@@ -166,7 +166,7 @@ test('微信公众号只使用正文 ProseMirror 和编辑器 JSAPI', async () =
   assert.equal(page.window.document.querySelector('.title-editor__input .ProseMirror').textContent, '')
 })
 
-test('微信公众号 JSAPI 改坏结构时回滚并保留空白标题', async () => {
+test('微信公众号接受平台改写后的正文且不回滚', async () => {
   const page = dom(`
     <textarea id="title"></textarea>
     <div id="body"><div class="ProseMirror"><p><br></p></div></div>
@@ -174,20 +174,19 @@ test('微信公众号 JSAPI 改坏结构时回滚并保留空白标题', async (
   const body = page.window.document.querySelector('#body .ProseMirror')
   let calls = 0
   page.window.__MP_Editor_JSAPI__ = {
-    invoke({ apiParam, sucCb }) {
+    invoke({ sucCb }) {
       calls += 1
-      body.innerHTML = calls === 1 ? '<p>只留下文字</p>' : apiParam.content
+      body.innerHTML = '<p>平台保留的正文</p>'
       sucCb()
     },
   }
 
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /微信公众号编辑器改变了文章结构/,
-  )
-  assert.equal(body.innerHTML, '<p><br></p>')
-  assert.equal(page.window.document.querySelector('#title').value, '')
-  assert.equal(calls, 2)
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'wechat')
+  assert.equal(body.innerHTML, '<p>平台保留的正文</p>')
+  assert.equal(page.window.document.querySelector('#title').value, article.title)
+  assert.equal(calls, 1)
 })
 
 test('百家号通过 UEditor 和 contenteditable 标题填入', async () => {
@@ -215,25 +214,42 @@ test('百家号通过 UEditor 和 contenteditable 标题填入', async () => {
   assert.equal(contentChanges, 1)
 })
 
-test('Markdown 编辑器写入后被改坏时验证回滚状态', async () => {
-  const page = dom(`
-    <input id="post-title" placeholder="标题">
-    <textarea id="md-editor"></textarea>
-  `, 'https://i.cnblogs.com/posts/edit')
-  const textarea = page.window.document.querySelector('#md-editor')
-  let inputEvents = 0
-  textarea.addEventListener('input', () => {
-    inputEvents += 1
-    if (inputEvents === 1) textarea.value = '平台改坏的正文'
-  })
+test('三个 Markdown 编辑器都接受平台改写后的内容且不回滚', async () => {
+  const cases = [
+    {
+      url: 'https://i.cnblogs.com/posts/edit',
+      html: '<input id="post-title" placeholder="标题"><textarea id="md-editor"></textarea>',
+      body: '#md-editor',
+      title: '#post-title',
+    },
+    {
+      url: 'https://editor.csdn.net/md/',
+      html: '<div class="article-bar__title"><input placeholder="标题"></div><pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>',
+      body: 'pre',
+      title: 'input',
+    },
+    {
+      url: 'https://my.oschina.net/u/1/blog/ai-write',
+      html: '<input placeholder="标题"><textarea></textarea>',
+      body: 'textarea',
+      title: 'input',
+    },
+  ]
 
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /博客园：编辑器在写入后改变了 Markdown/,
-  )
-  assert.equal(page.window.document.querySelector('#post-title').value, '')
-  assert.equal(textarea.value, '')
-  assert.equal(inputEvents, 2)
+  for (const item of cases) {
+    const page = dom(item.html, item.url)
+    const body = page.window.document.querySelector(item.body)
+    body.addEventListener('input', () => {
+      if ('value' in body) body.value = '平台保留的 Markdown'
+      else body.textContent = '平台保留的 Markdown'
+    })
+
+    const result = await injectPlatformArticle(page.window.document, article)
+
+    assert.equal(result.bodyFilled, true)
+    assert.equal('value' in body ? body.value : body.textContent, '平台保留的 Markdown')
+    assert.equal(page.window.document.querySelector(item.title).value, article.title)
+  }
 })
 
 test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
@@ -311,70 +327,25 @@ test('知乎不会点击解析弹窗外新出现的无关确认按钮', async ()
   assert.equal(window.document.querySelector('textarea').value, '')
 })
 
-test('知乎解析后丢失 Mermaid 图片来源时回滚', async () => {
-  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
-    body.innerHTML = article.html
-    body.querySelector('img').removeAttribute('src')
-    parse.remove()
-    const confirm = dialog.ownerDocument.createElement('button')
-    confirm.textContent = '确认'
-    dialog.append(confirm)
-  })
-
-  await assert.rejects(
-    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
-    /知乎编辑器改变了这些内容：图片/,
-  )
-  assert.equal(editor.innerHTML, '')
-  assert.equal(window.document.querySelector('textarea').value, '')
-})
-
-test('知乎解析后把 Mermaid 图片替换成错误 data URL 或远程 URL 时回滚', async () => {
-  for (const replacement of [
-    'data:image/png;base64,eQ==',
-    'https://wrong.example/mermaid.png',
-  ]) {
-    const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
-      body.innerHTML = article.html
-      body.querySelector('img').setAttribute('src', replacement)
-      parse.remove()
-      const confirm = dialog.ownerDocument.createElement('button')
-      confirm.textContent = '确认'
-      dialog.append(confirm)
-    })
-
-    await assert.rejects(
-      injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
-      /知乎编辑器改变了这些内容：图片/,
-    )
-    assert.equal(editor.innerHTML, '')
-  }
-})
-
-test('知乎解析后改变表格拓扑和代码内容时回滚', async () => {
+test('知乎接受解析器改写后的图片、表格与代码且不回滚', async () => {
   const richArticle = {
     title: '结构测试',
-    html: '<table><thead><tr><th>列</th></tr></thead><tbody><tr><td>值</td></tr></tbody></table><pre><code>line 1\n  line 2</code></pre>',
-    portableMarkdown: '| 列 |\n| --- |\n| 值 |\n\n```text\nline 1\n  line 2\n```',
+    html: '<img alt="图" src="data:image/png;base64,eA=="><table><thead><tr><th>列</th></tr></thead></table><pre><code>line 1\n  line 2</code></pre>',
+    portableMarkdown: '![图](data:image/png;base64,eA==)\n\n| 列 |\n| --- |\n\n```text\nline 1\n  line 2\n```',
   }
   const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
-    body.innerHTML = richArticle.html
-    const heading = body.querySelector('th')
-    const plainCell = heading.ownerDocument.createElement('td')
-    plainCell.textContent = heading.textContent
-    heading.replaceWith(plainCell)
-    body.querySelector('code').textContent = 'line 1 line 2'
+    body.innerHTML = '<p>平台保留的正文</p>'
     parse.remove()
     const confirm = dialog.ownerDocument.createElement('button')
     confirm.textContent = '确认'
     dialog.append(confirm)
   })
 
-  await assert.rejects(
-    injectPlatformArticle(window.document, richArticle, { waitTimeoutMs: 20 }),
-    /表格、代码块/,
-  )
-  assert.equal(editor.innerHTML, '')
+  const result = await injectPlatformArticle(window.document, richArticle, { waitTimeoutMs: 20 })
+
+  assert.equal(result.platformId, 'zhihu')
+  assert.equal(editor.innerHTML, '<p>平台保留的正文</p>')
+  assert.equal(window.document.querySelector('textarea').value, richArticle.title)
 })
 
 test('今日头条通过 ProseMirror insertHTML 导入并保留结构', async () => {
@@ -402,28 +373,7 @@ test('今日头条通过 ProseMirror insertHTML 导入并保留结构', async ()
   assert.equal(clicks, 0)
 })
 
-test('CSDN 写入后被改坏时恢复空白编辑器', async () => {
-  const page = dom(`
-    <div class="article-bar__title"><input placeholder="标题"></div>
-    <pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>
-  `, 'https://editor.csdn.net/md/')
-  const editor = page.window.document.querySelector('pre')
-  let events = 0
-  editor.addEventListener('input', () => {
-    events += 1
-    if (events === 1) editor.textContent = '平台改坏的正文'
-  })
-
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /CSDN：编辑器在写入后改变了 Markdown/,
-  )
-  assert.equal(editor.textContent, '')
-  assert.equal(page.window.document.querySelector('input').value, '')
-  assert.equal(events, 2)
-})
-
-test('百家号正文被过滤时回滚 UEditor 和标题', async () => {
+test('百家号接受 UEditor 过滤后的正文且不回滚', async () => {
   const page = dom(`
     <div class="client_components_titleInput"><div contenteditable="true"></div></div>
   `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
@@ -433,22 +383,21 @@ test('百家号正文被过滤时回滚 UEditor 和标题', async () => {
     instants: {
       ueditorInstant0: {
         getContent: () => currentHtml,
-        setContent(html) {
+        setContent() {
           setCalls += 1
-          currentHtml = setCalls === 1 ? '<p>只留下文字</p>' : html
+          currentHtml = '<p>平台保留的正文</p>'
         },
         fireEvent() {},
       },
     },
   }
 
-  await assert.rejects(
-    injectPlatformArticle(page.window.document, article),
-    /百家号编辑器改变了文章结构/,
-  )
-  assert.equal(currentHtml, '<p><br></p>')
-  assert.equal(page.window.document.querySelector('[contenteditable="true"]').textContent, '')
-  assert.equal(setCalls, 2)
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'baijiahao')
+  assert.equal(currentHtml, '<p>平台保留的正文</p>')
+  assert.equal(page.window.document.querySelector('[contenteditable="true"]').textContent, article.title)
+  assert.equal(setCalls, 1)
 })
 
 test('知乎没有出现解析确认时执行 undo 并恢复标题', async () => {
@@ -492,7 +441,7 @@ test('知乎没有出现解析确认时执行 undo 并恢复标题', async () =>
   assert.equal(undoCalls, 1)
 })
 
-test('今日头条结构被改变时 undo 回滚正文和标题', async () => {
+test('今日头条接受 ProseMirror 改写后的正文且不回滚', async () => {
   const page = dom(`
     <textarea placeholder="请输入标题"></textarea>
     <div class="ProseMirror" contenteditable="true"></div>
@@ -501,21 +450,17 @@ test('今日头条结构被改变时 undo 回滚正文和标题', async () => {
   const editor = window.document.querySelector('.ProseMirror')
   let undoCalls = 0
   window.document.execCommand = (command) => {
-    if (command === 'insertHTML') editor.innerHTML = '<p>只留下文字</p>'
-    if (command === 'undo') {
-      undoCalls += 1
-      editor.innerHTML = ''
-    }
+    if (command === 'insertHTML') editor.innerHTML = '<p>平台保留的正文</p>'
+    if (command === 'undo') undoCalls += 1
     return true
   }
 
-  await assert.rejects(
-    injectPlatformArticle(window.document, article),
-    /今日头条编辑器改变了文章结构/,
-  )
-  assert.equal(editor.innerHTML, '')
-  assert.equal(window.document.querySelector('textarea').value, '')
-  assert.equal(undoCalls, 1)
+  const result = await injectPlatformArticle(window.document, article)
+
+  assert.equal(result.platformId, 'toutiao')
+  assert.equal(editor.innerHTML, '<p>平台保留的正文</p>')
+  assert.equal(window.document.querySelector('textarea').value, article.title)
+  assert.equal(undoCalls, 0)
 })
 
 test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () => {
