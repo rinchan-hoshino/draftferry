@@ -134,6 +134,7 @@ test('通过搜狐 Quill API 原子填入内容，但不触发保存或发布', 
   const editor = window.document.querySelector('.ql-editor')
   let saves = 0
   let publishes = 0
+  window.confirm = () => { throw new Error('空白文章不应弹出覆盖确认') }
   window.document.querySelector('#save').addEventListener('click', () => { saves += 1 })
   window.document.querySelector('#publish').addEventListener('click', () => { publishes += 1 })
   installFakeQuill(window)
@@ -182,6 +183,54 @@ test('搜狐接受平台对写入结果的改写且不回滚', async () => {
   assert.equal(title.value, '平台保留的标题')
   assert.equal(editor.innerHTML, '<p>平台二次改写的正文</p>')
   assert.equal(fake.getRestoreCalls(), 0)
+})
+
+test('搜狐已有内容时取消确认不会修改页面', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const title = window.document.querySelector('input')
+  const editor = window.document.querySelector('.ql-editor')
+  title.value = '已有标题'
+  editor.innerHTML = '<p>已有正文</p>'
+  let confirms = 0
+  let confirmMessage = ''
+  window.confirm = (message) => {
+    confirms += 1
+    confirmMessage = message
+    return false
+  }
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '新标题',
+      html: '<p>新正文</p>',
+    }),
+    /已取消导入/,
+  )
+
+  assert.equal(confirms, 1)
+  assert.equal(confirmMessage, '当前文章已有内容，继续导入可能覆盖或合并现有内容，是否继续？')
+  assert.equal(title.value, '已有标题')
+  assert.equal(editor.innerHTML, '<p>已有正文</p>')
+})
+
+test('搜狐已有内容时确认后继续现有导入流程', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const title = window.document.querySelector('input')
+  const editor = window.document.querySelector('.ql-editor')
+  title.value = '已有标题'
+  editor.innerHTML = '<p>已有正文</p>'
+  installFakeQuill(window)
+  window.confirm = () => true
+
+  await injectSohuArticle(window.document, {
+    title: '新标题',
+    html: '<p>新正文</p>',
+  })
+
+  assert.equal(title.value, '新标题')
+  assert.equal(editor.innerHTML, '<p>新正文</p>')
 })
 
 test('标题写入异常时恢复 Quill Delta 和原标题', async () => {

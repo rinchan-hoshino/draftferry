@@ -93,6 +93,7 @@ test('博客园空白 Markdown 编辑器可填入且不点击保存发布', asyn
     <button id="save">保存</button><button id="publish">发布</button>
   `, 'https://i.cnblogs.com/posts/edit')
   let clicks = 0
+  page.window.confirm = () => { throw new Error('空白文章不应弹出覆盖确认') }
   page.window.document.querySelector('#save').onclick = () => { clicks += 1 }
   page.window.document.querySelector('#publish').onclick = () => { clicks += 1 }
 
@@ -463,7 +464,27 @@ test('今日头条接受 ProseMirror 改写后的正文且不回滚', async () =
   assert.equal(undoCalls, 0)
 })
 
-test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () => {
+test('已有 Markdown 文章确认后继续现有导入流程', async () => {
+  const page = dom(`
+    <input id="post-title" value="已有标题">
+    <textarea id="md-editor">已有正文</textarea>
+  `, 'https://i.cnblogs.com/posts/edit')
+  let confirms = 0
+  page.window.confirm = () => {
+    confirms += 1
+    return true
+  }
+
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'cnblogs')
+  assert.equal(confirms, 1)
+  assert.equal(page.window.document.querySelector('#post-title').value, article.title)
+  assert.equal(page.window.document.querySelector('#md-editor').value, article.portableMarkdown)
+})
+
+test('七个平台已有内容时取消确认不会修改页面', async () => {
+  let baijiahaoSetCalls = 0
   const baijiahao = dom(`
     <div class="client_components_titleInput"><div contenteditable="true"></div></div>
   `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
@@ -471,7 +492,7 @@ test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () =>
     instants: {
       ueditorInstant0: {
         getContent: () => '<p>已有正文</p>',
-        setContent() {},
+        setContent() { baijiahaoSetCalls += 1 },
       },
     },
   }
@@ -486,9 +507,20 @@ test('任一已支持编辑器有标题或正文时都拒绝覆盖', async () =>
   ]
 
   for (const page of pages) {
+    const before = page.window.document.documentElement.outerHTML
+    let confirms = 0
+    page.window.confirm = () => {
+      confirms += 1
+      return false
+    }
+
     await assert.rejects(
       injectPlatformArticle(page.window.document, article),
-      /已有内容/,
+      /已取消导入/,
     )
+
+    assert.equal(confirms, 1)
+    assert.equal(page.window.document.documentElement.outerHTML, before)
   }
+  assert.equal(baijiahaoSetCalls, 0)
 })

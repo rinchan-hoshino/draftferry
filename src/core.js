@@ -223,6 +223,15 @@ export function hasExistingSohuDraft(document) {
   return Boolean(title || hasMeaningfulEditorContent(editor))
 }
 
+export const OVERWRITE_CONFIRM_MESSAGE = '当前文章已有内容，继续导入可能覆盖或合并现有内容，是否继续？'
+
+export function confirmPotentialOverwrite(windowObject, hasExistingContent) {
+  if (!hasExistingContent) return
+  if (!windowObject.confirm(OVERWRITE_CONFIRM_MESSAGE)) {
+    throw new Error('已取消导入')
+  }
+}
+
 function getSohuQuill(windowObject, editor) {
   const container = editor.closest('.ql-container')
   const quill = container && windowObject.Quill?.find?.(container)
@@ -273,9 +282,7 @@ export async function injectSohuArticle(document, article) {
   if (typeof article?.html !== 'string' || !article.html.trim()) {
     throw new Error('没有可填入的正文内容')
   }
-  if (hasExistingSohuDraft(document)) {
-    throw new Error('当前标题或正文已有内容；为避免覆盖，请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(document))
 
   const quill = getSohuQuill(windowObject, editor)
   const previousDelta = cloneDelta(windowObject, quill.getContents())

@@ -1,4 +1,5 @@
 import {
+  confirmPotentialOverwrite,
   hasMeaningfulEditorContent,
   injectSohuArticle,
 } from './core.js'
@@ -100,13 +101,14 @@ function writeBodyValue(windowObject, editor, value, notify = true) {
   }
 }
 
-function assertBlankTextEditor(titleControl, bodyEditor) {
+function confirmTextEditorOverwrite(windowObject, titleControl, bodyEditor) {
   const bodyHasContent = 'value' in bodyEditor
     ? readBodyValue(bodyEditor).trim() !== ''
     : hasMeaningfulEditorContent(bodyEditor)
-  if (readControlValue(titleControl).trim() || bodyHasContent) {
-    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(
+    windowObject,
+    Boolean(readControlValue(titleControl).trim() || bodyHasContent),
+  )
 }
 
 async function injectMarkdownTextEditor(document, article, config) {
@@ -122,7 +124,7 @@ async function injectMarkdownTextEditor(document, article, config) {
   if (!bodyEditor) {
     throw new Error(`${config.name}：未找到 Markdown 编辑器`)
   }
-  assertBlankTextEditor(titleControl, bodyEditor)
+  confirmTextEditorOverwrite(windowObject, titleControl, bodyEditor)
 
   writeBodyValue(windowObject, bodyEditor, article.portableMarkdown)
   writeControl(windowObject, titleControl, article.title)
@@ -186,12 +188,13 @@ async function injectWechat(document, article) {
   if (!titleControl || !bodyEditor) {
     throw new Error('微信公众号：未找到标题或正文编辑器')
   }
-  if (
-    readControlValue(titleControl).trim()
-    || hasMeaningfulEditorContent(bodyEditor)
-  ) {
-    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(
+    windowObject,
+    Boolean(
+      readControlValue(titleControl).trim()
+      || hasMeaningfulEditorContent(bodyEditor)
+    ),
+  )
   if (typeof windowObject.__MP_Editor_JSAPI__?.invoke !== 'function') {
     throw new Error('微信公众号：未找到 mp_editor_set_content 接口，待真实页面确认')
   }
@@ -226,9 +229,10 @@ async function injectBaijiahao(document, article) {
 
   const currentTitle = readControlValue(titleControl)
   const currentHtml = editor.getContent() ?? ''
-  if (currentTitle.trim() || hasMeaningfulEditorContent(parseHtml(document, currentHtml))) {
-    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(
+    windowObject,
+    Boolean(currentTitle.trim() || hasMeaningfulEditorContent(parseHtml(document, currentHtml))),
+  )
 
   editor.setContent(article.html)
   editor.fireEvent?.('contentChange')
@@ -250,9 +254,10 @@ async function injectToutiao(document, article) {
   const titleControl = document.querySelector('textarea[placeholder*="标题"]')
   const editor = document.querySelector('.ProseMirror[contenteditable="true"], .ProseMirror')
   if (!titleControl || !editor) throw new Error('今日头条：未找到标题或正文编辑器')
-  if (readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)) {
-    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(
+    windowObject,
+    Boolean(readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)),
+  )
   if (typeof document.execCommand !== 'function') {
     throw new Error('今日头条：浏览器不支持 insertHTML 编辑命令')
   }
@@ -311,9 +316,10 @@ async function injectZhihu(document, article, options) {
   const titleControl = queryFirst(document, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]'])
   const editor = queryFirst(document, ['.public-DraftEditor-content[contenteditable="true"]', '.DraftEditor-root [contenteditable="true"]'])
   if (!titleControl || !editor) throw new Error('知乎：未找到标题或正文编辑器')
-  if (readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)) {
-    throw new Error('当前标题或正文已有内容；请新建空白文章后再导入')
-  }
+  confirmPotentialOverwrite(
+    windowObject,
+    Boolean(readControlValue(titleControl).trim() || hasMeaningfulEditorContent(editor)),
+  )
   if (!windowObject.DataTransfer || !windowObject.ClipboardEvent || typeof document.execCommand !== 'function') {
     throw new Error('知乎：浏览器缺少 Markdown 粘贴或 undo 接口')
   }
