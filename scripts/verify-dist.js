@@ -30,9 +30,9 @@ const expectedMatches = [
   'https://zhuanlan.zhihu.com/write*',
   'https://mp.weixin.qq.com/cgi-bin/appmsg*',
   'https://my.oschina.net/*/blog/ai-write*',
-  'https://baijiahao.baidu.com/builder/rc/edit*',
-  'https://mp.toutiao.com/profile_v4/graphic/publish*',
-  'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle*',
+  'https://baijiahao.baidu.com/*',
+  'https://mp.toutiao.com/*',
+  'https://mp.sohu.com/*',
 ]
 for (const match of expectedMatches) {
   assert.ok(artifact.includes(`// @match        ${match}`), `缺少 @match ${match}`)

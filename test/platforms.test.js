@@ -92,6 +92,32 @@ test('按当前页面 hostname 识别八个平台', () => {
   assert.equal(detectPlatform(new URL('https://example.com/')), null)
 })
 
+test('后台首页不误判为编辑器，只在三条实测发布路由激活', () => {
+  const cases = [
+    [
+      'https://baijiahao.baidu.com/builder/rc/home',
+      'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1',
+      'baijiahao',
+    ],
+    [
+      'https://mp.toutiao.com/profile_v4/index',
+      'https://mp.toutiao.com/profile_v4/graphic/publish',
+      'toutiao',
+    ],
+    [
+      'https://mp.sohu.com/mpfe/v4/contentManagement/news/list',
+      'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?contentStatus=1',
+      'sohu',
+    ],
+  ]
+
+  for (const [backgroundUrl, editorUrl, platformId] of cases) {
+    assert.equal(detectPlatform(new URL(backgroundUrl)), null, backgroundUrl)
+    assert.equal(detectPlatform(new URL(editorUrl))?.id, platformId, editorUrl)
+    assert.equal(detectPlatform(new URL(`${editorUrl.split('?')[0]}/anything`)), null)
+  }
+})
+
 test('博客园空白 Markdown 编辑器可填入且不点击保存发布', async () => {
   const page = dom(`
     <input id="post-title" placeholder="标题">

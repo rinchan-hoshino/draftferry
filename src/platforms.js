@@ -10,9 +10,24 @@ const PLATFORMS = [
   { id: 'zhihu', name: '知乎', hosts: ['zhihu.com'] },
   { id: 'wechat', name: '微信公众号', hosts: ['mp.weixin.qq.com'] },
   { id: 'oschina', name: '开源中国', hosts: ['oschina.net'] },
-  { id: 'baijiahao', name: '百家号', hosts: ['baijiahao.baidu.com'] },
-  { id: 'toutiao', name: '今日头条', hosts: ['toutiao.com'] },
-  { id: 'sohu', name: '搜狐号', hosts: ['mp.sohu.com'] },
+  {
+    id: 'baijiahao',
+    name: '百家号',
+    hosts: ['baijiahao.baidu.com'],
+    editorPath: /^\/builder\/rc\/edit\/?$/,
+  },
+  {
+    id: 'toutiao',
+    name: '今日头条',
+    hosts: ['toutiao.com'],
+    editorPath: /^\/profile_v4\/graphic\/publish\/?$/,
+  },
+  {
+    id: 'sohu',
+    name: '搜狐号',
+    hosts: ['mp.sohu.com'],
+    editorPath: /^\/mpfe\/v4\/contentManagement\/news\/addarticle\/?$/,
+  },
 ]
 
 export const PLATFORM_IDS = PLATFORMS.map((platform) => platform.id)
@@ -28,6 +43,7 @@ function hostnameMatches(hostname, expected) {
 export function detectPlatform(url) {
   return PLATFORMS.find((platform) => (
     platform.hosts.some((host) => hostnameMatches(url.hostname, host))
+    && (!platform.editorPath || platform.editorPath.test(url.pathname))
   )) ?? null
 }
 

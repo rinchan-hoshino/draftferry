@@ -19,9 +19,9 @@ const metadata = `// ==UserScript==
 // @match        https://zhuanlan.zhihu.com/write*
 // @match        https://mp.weixin.qq.com/cgi-bin/appmsg*
 // @match        https://my.oschina.net/*/blog/ai-write*
-// @match        https://baijiahao.baidu.com/builder/rc/edit*
-// @match        https://mp.toutiao.com/profile_v4/graphic/publish*
-// @match        https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle*
+// @match        https://baijiahao.baidu.com/*
+// @match        https://mp.toutiao.com/*
+// @match        https://mp.sohu.com/*
 // @grant        none
 // @run-at       document-idle
 // @noframes

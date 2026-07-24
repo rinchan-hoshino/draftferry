@@ -149,11 +149,19 @@ function createPanel() {
   return panel
 }
 
-function ensurePanel() {
-  if (!document.getElementById(PANEL_ID) && document.body) {
+function syncPanel() {
+  const panel = document.getElementById(PANEL_ID)
+  if (!currentPlatform()) {
+    panel?.remove()
+    return
+  }
+  if (!panel && document.body) {
     document.body.append(createPanel())
   }
 }
 
-ensurePanel()
-new MutationObserver(ensurePanel).observe(document.body, { childList: true })
+syncPanel()
+new MutationObserver(syncPanel).observe(document.body, { childList: true })
+window.addEventListener('popstate', syncPanel)
+window.addEventListener('hashchange', syncPanel)
+window.navigation?.addEventListener?.('currententrychange', syncPanel)
