@@ -311,6 +311,75 @@ async function waitForButton(
   })
 }
 
+function dataImageUrlToBlob(windowObject, source) {
+  const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i)
+  if (!match) {
+    throw new Error('知乎：内嵌图片不是有效的 Base64 图片')
+  }
+  const binary = windowObject.atob(match[2])
+  const bytes = windowObject.Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  return new windowObject.Blob([bytes], { type: match[1].toLowerCase() })
+}
+
+function imageFileExtension(mimeType) {
+  const subtype = mimeType.split('/')[1]?.toLowerCase() ?? 'png'
+  if (subtype === 'jpeg') return 'jpg'
+  return subtype.replace(/[^a-z0-9]/g, '') || 'png'
+}
+
+async function uploadZhihuDataImage(windowObject, source, index) {
+  const blob = dataImageUrlToBlob(windowObject, source)
+  const formData = new windowObject.FormData()
+  const extension = imageFileExtension(blob.type)
+  formData.append('picture', blob, `draftferry-${index + 1}.${extension}`)
+  formData.append('source', 'article')
+  const response = await windowObject.fetch(
+    'https://zhuanlan.zhihu.com/api/uploaded_images',
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'x-requested-with': 'fetch' },
+      body: formData,
+    },
+  )
+  if (!response.ok) {
+    throw new Error(`知乎：图片上传失败（HTTP ${response.status}）`)
+  }
+  const result = await response.json()
+  const uploadedSource = typeof result?.src === 'string' ? result.src.trim() : ''
+  if (!uploadedSource) {
+    throw new Error('知乎：图片上传响应没有有效地址')
+  }
+  const uploadedUrl = new windowObject.URL(uploadedSource, windowObject.location.href)
+  if (!/^https?:$/.test(uploadedUrl.protocol)) {
+    throw new Error('知乎：图片上传响应没有有效地址')
+  }
+  return uploadedUrl.href
+}
+
+async function prepareZhihuMarkdown(document, article) {
+  const windowObject = document.defaultView
+  const container = parseHtml(document, article.html)
+  const sources = [...container.querySelectorAll('img')]
+    .map((image) => image.getAttribute('src')?.trim() ?? '')
+    .filter((source) => /^data:image\//i.test(source))
+  let markdown = article.portableMarkdown
+  const uploadedUrls = new Map()
+  for (const source of sources) {
+    if (!markdown.includes(source)) {
+      throw new Error('知乎：无法在 Markdown 中定位内嵌图片')
+    }
+    if (!uploadedUrls.has(source)) {
+      uploadedUrls.set(
+        source,
+        await uploadZhihuDataImage(windowObject, source, uploadedUrls.size),
+      )
+    }
+    markdown = markdown.replaceAll(source, uploadedUrls.get(source))
+  }
+  return markdown
+}
+
 async function injectZhihu(document, article, options) {
   const windowObject = document.defaultView
   const titleControl = queryFirst(document, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]'])
@@ -326,8 +395,9 @@ async function injectZhihu(document, article, options) {
   const previousTitle = readControlValue(titleControl)
   let pasteDispatched = false
   try {
+    const markdown = await prepareZhihuMarkdown(document, article)
     const transfer = new windowObject.DataTransfer()
-    transfer.setData('text/plain', article.portableMarkdown)
+    transfer.setData('text/plain', markdown)
     const buttonsBeforePaste = new Set(
       [...document.querySelectorAll('button')].filter(isActionableButton),
     )

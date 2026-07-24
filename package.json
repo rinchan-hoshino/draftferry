@@ -1,6 +1,6 @@
 {
   "name": "draftferry-userscript",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "稿渡：为八个内容平台提供 Markdown 导入和 Mermaid 转图",
   "scripts": {
     "test": "node --test",

@@ -14,6 +14,12 @@ const article = {
   portableMarkdown: '## 小标题\n\n正文\n\n![流程图](data:image/png;base64,eA==)',
 }
 
+const zhihuArticle = {
+  ...article,
+  html: '<h2 style="font-size:22px">小标题</h2><p>正文</p><img alt="远程图片" src="https://example.com/image.png">',
+  portableMarkdown: '## 小标题\n\n正文\n\n![远程图片](https://example.com/image.png)',
+}
+
 function dom(html, url) {
   return new JSDOM(html, { url })
 }
@@ -253,6 +259,53 @@ test('三个 Markdown 编辑器都接受平台改写后的内容且不回滚', a
   }
 })
 
+test('知乎先上传 data URL 图片，再用远程 URL 解析 Markdown', async () => {
+  const uploadedUrl = 'https://pic4.zhimg.com/uploaded.png'
+  let uploads = 0
+  const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
+    assert.equal(
+      body.textContent,
+      article.portableMarkdown.replace('data:image/png;base64,eA==', uploadedUrl),
+    )
+    body.innerHTML = `<p>正文</p><img src="${uploadedUrl}">`
+    parse.remove()
+    const confirm = dialog.ownerDocument.createElement('button')
+    confirm.textContent = '确认'
+    dialog.append(confirm)
+  })
+  window.fetch = async (url, options) => {
+    uploads += 1
+    assert.equal(url, 'https://zhuanlan.zhihu.com/api/uploaded_images')
+    assert.equal(options.method, 'POST')
+    assert.equal(options.credentials, 'include')
+    assert.equal(options.body.get('source'), 'article')
+    assert.equal(options.body.get('picture').type, 'image/png')
+    return { ok: true, json: async () => ({ src: uploadedUrl }) }
+  }
+
+  const result = await injectPlatformArticle(window.document, article)
+
+  assert.equal(result.platformId, 'zhihu')
+  assert.equal(uploads, 1)
+  assert.equal(editor.textContent.includes('data:image'), false)
+  assert.equal(editor.querySelector('img').src, uploadedUrl)
+})
+
+test('知乎图片上传失败时在粘贴前停止且不修改页面', async () => {
+  let parseCalls = 0
+  const { window, editor } = zhihuFixture(() => { parseCalls += 1 })
+  window.fetch = async () => ({ ok: false, status: 403 })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article),
+    /知乎：图片上传失败（HTTP 403）/,
+  )
+
+  assert.equal(parseCalls, 0)
+  assert.equal(editor.innerHTML, '')
+  assert.equal(window.document.querySelector('textarea').value, '')
+})
+
 test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
   const page = dom(`
     <textarea placeholder="请输入标题"></textarea>
@@ -286,7 +339,7 @@ test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
     const parse = window.document.createElement('button')
     parse.textContent = '确认并解析'
     parse.onclick = () => {
-      editor.innerHTML = article.html
+      editor.innerHTML = zhihuArticle.html
       parse.remove()
       const confirm = window.document.createElement('button')
       confirm.textContent = '确认'
@@ -300,10 +353,10 @@ test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
     return true
   }
 
-  const result = await injectPlatformArticle(window.document, article)
+  const result = await injectPlatformArticle(window.document, zhihuArticle)
 
   assert.equal(result.platformId, 'zhihu')
-  assert.equal(window.document.querySelector('textarea').value, article.title)
+  assert.equal(window.document.querySelector('textarea').value, zhihuArticle.title)
   assert.equal(editor.querySelectorAll('img').length, 1)
   assert.equal(saveClicks, 0)
 })
@@ -311,7 +364,7 @@ test('知乎通过 Markdown 粘贴与解析确认导入', async () => {
 test('知乎不会点击解析弹窗外新出现的无关确认按钮', async () => {
   let unrelatedClicks = 0
   const { window, editor } = zhihuFixture(({ window: pageWindow, editor: body, parse }) => {
-    body.innerHTML = article.html
+    body.innerHTML = zhihuArticle.html
     parse.remove()
     const unrelated = pageWindow.document.createElement('button')
     unrelated.textContent = '确认'
@@ -320,7 +373,7 @@ test('知乎不会点击解析弹窗外新出现的无关确认按钮', async ()
   })
 
   await assert.rejects(
-    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    injectPlatformArticle(window.document, zhihuArticle, { waitTimeoutMs: 20 }),
     /知乎：没有出现解析后的“确认”/,
   )
   assert.equal(unrelatedClicks, 0)
@@ -331,8 +384,8 @@ test('知乎不会点击解析弹窗外新出现的无关确认按钮', async ()
 test('知乎接受解析器改写后的图片、表格与代码且不回滚', async () => {
   const richArticle = {
     title: '结构测试',
-    html: '<img alt="图" src="data:image/png;base64,eA=="><table><thead><tr><th>列</th></tr></thead></table><pre><code>line 1\n  line 2</code></pre>',
-    portableMarkdown: '![图](data:image/png;base64,eA==)\n\n| 列 |\n| --- |\n\n```text\nline 1\n  line 2\n```',
+    html: '<img alt="图" src="https://example.com/image.png"><table><thead><tr><th>列</th></tr></thead></table><pre><code>line 1\n  line 2</code></pre>',
+    portableMarkdown: '![图](https://example.com/image.png)\n\n| 列 |\n| --- |\n\n```text\nline 1\n  line 2\n```',
   }
   const { window, editor } = zhihuFixture(({ editor: body, dialog, parse }) => {
     body.innerHTML = '<p>平台保留的正文</p>'
@@ -434,7 +487,7 @@ test('知乎没有出现解析确认时执行 undo 并恢复标题', async () =>
   }
 
   await assert.rejects(
-    injectPlatformArticle(window.document, article, { waitTimeoutMs: 20 }),
+    injectPlatformArticle(window.document, zhihuArticle, { waitTimeoutMs: 20 }),
     /知乎：没有出现“确认并解析”/,
   )
   assert.equal(editor.textContent, '')
