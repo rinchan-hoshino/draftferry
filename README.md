@@ -11,11 +11,11 @@
 - 油猴安装文件：`draftferry.user.js`
 - 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前版本为 `0.3.4`；Tampermonkey 的更新与下载地址都固定到上述链接。
+产品名和链接不再随平台数量变化。当前版本为 `0.3.5`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
-| 平台 | 0.3.4 Preview 导入方式 |
+| 平台 | 0.3.5 Preview 导入方式 |
 | --- | --- |
 | 博客园 | 向 Markdown textarea 填入可移植 Markdown |
 | CSDN | 向 Markdown contenteditable 填入可移植 Markdown |
@@ -52,7 +52,7 @@
 ## 转换与安全边界
 
 - 第一处一级标题作为平台标题，不重复放进正文；
-- Mermaid 代码块转换成白底 PNG；
+- Mermaid 代码块使用官方 Mermaid 延迟转换成白底 PNG；重复图表复用缓存，图片保留自然尺寸且宽度最多 1000px；
 - 原始 Markdown 内嵌 HTML 先由 DOMPurify 清理；
 - 富文本平台接收带内联样式的 HTML；
 - Markdown 平台接收由清理后 HTML 重新生成的 GFM Markdown；

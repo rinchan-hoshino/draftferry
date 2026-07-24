@@ -156,7 +156,4 @@ function ensurePanel() {
 }
 
 ensurePanel()
-new MutationObserver(ensurePanel).observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-})
+new MutationObserver(ensurePanel).observe(document.body, { childList: true })
