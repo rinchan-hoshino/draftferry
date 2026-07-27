@@ -169,6 +169,33 @@ test('搜狐新版微前端可从编辑器容器的 __quill 取得实例', async
   assert.equal(editor.textContent.includes('data:image'), false)
 })
 
+test('搜狐可从编辑根节点属性或 Quill.find 向上查找实例', async () => {
+  const directDom = createSohuDom()
+  const directEditor = directDom.window.document.querySelector('.ql-editor')
+  const { quill: directQuill } = installFakeQuill(directDom.window)
+  directDom.window.Quill.find = () => { throw new Error('platform find failed') }
+  directEditor.__quill = directQuill
+
+  await injectSohuArticle(directDom.window.document, {
+    title: '根节点实例',
+    html: '<p>直接属性正文</p>',
+  })
+  assert.equal(directEditor.textContent, '直接属性正文')
+
+  const bubbleDom = createSohuDom()
+  const bubbleEditor = bubbleDom.window.document.querySelector('.ql-editor')
+  const { quill: bubbleQuill } = installFakeQuill(bubbleDom.window)
+  bubbleDom.window.Quill.find = (node, bubble) => (
+    node === bubbleEditor && bubble ? bubbleQuill : null
+  )
+
+  await injectSohuArticle(bubbleDom.window.document, {
+    title: '向上查找实例',
+    html: '<p>向上查找正文</p>',
+  })
+  assert.equal(bubbleEditor.textContent, '向上查找正文')
+})
+
 test('找不到真实 Quill 实例时在改动前失败', async () => {
   const dom = createSohuDom()
   await assert.rejects(

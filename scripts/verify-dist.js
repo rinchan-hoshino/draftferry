@@ -31,7 +31,7 @@ const expectedMatches = [
   'https://baijiahao.baidu.com/*',
   'https://mp.toutiao.com/*',
   'https://mp.sohu.com/*',
-  'https://msp.aliyun.com/msp/commodity/list/*',
+  'https://msp.aliyun.com/msp/commodity/list*',
   'https://console.cloud.tencent.com/serviceprovider/products/createNew*',
 ]
 for (const match of expectedMatches) {

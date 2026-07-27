@@ -57,7 +57,7 @@ function createPanel() {
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
     <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 稿渡 Preview` : '当前平台未支持'}</span>
-    <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden>
+    <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden style="display:none !important">
   `
   panel.setAttribute('style', [
     'position: fixed',

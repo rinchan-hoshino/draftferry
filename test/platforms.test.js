@@ -239,6 +239,54 @@ test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async 
   assert.equal(clicks, 0)
 })
 
+test('腾讯云市场接受与唯一编辑器分层的全局商品详情标签', async () => {
+  const page = dom(`
+    <div class="market-label"><span>商品详情</span></div>
+    <div class="nested"><div><div><div><div><div><div>
+      <div class="w-e-text" contenteditable="true"></div>
+    </div></div></div></div></div></div></div>
+  `, 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+  const label = page.window.document.querySelector('.market-label span')
+  const editor = page.window.document.querySelector('.w-e-text')
+  label.getBoundingClientRect = () => ({
+    left: 20, right: 100, top: 100, bottom: 130, width: 80, height: 30,
+  })
+  editor.getBoundingClientRect = () => ({
+    left: 120, right: 620, top: 90, bottom: 390, width: 500, height: 300,
+  })
+  page.window.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    editor.innerHTML = html
+    return true
+  }
+
+  const result = await injectPlatformArticle(page.window.document, {
+    ...article,
+    html: '<p>只写商品详情</p>',
+    portableMarkdown: '只写商品详情',
+  })
+
+  assert.equal(result.platformId, 'tencent-market')
+  assert.equal(editor.textContent, '只写商品详情')
+})
+
+test('腾讯云市场拒绝与商品详情标签无结构或视觉关联的唯一编辑器', async () => {
+  const page = dom(`
+    <div><span>商品详情</span></div>
+    <section><span>客户案例</span><div class="w-e-text" contenteditable="true"></div></section>
+  `, 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+
+  await assert.rejects(
+    injectPlatformArticle(page.window.document, {
+      ...article,
+      html: '<p>不得误写</p>',
+      portableMarkdown: '不得误写',
+    }),
+    /未找到唯一且标注为“商品详情”的编辑器/,
+  )
+  assert.equal(page.window.document.querySelector('.w-e-text').innerHTML, '')
+})
+
 test('云市场内嵌图片未上传时恢复原商品详情', async () => {
   const aliyun = dom(`
     <div class="acpn-form-item"><label>产品详情：</label>

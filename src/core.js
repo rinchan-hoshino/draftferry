@@ -232,15 +232,44 @@ export function confirmPotentialOverwrite(windowObject, hasExistingContent) {
   }
 }
 
+function isSohuQuill(candidate) {
+  return Boolean(
+    candidate
+    && typeof candidate.getContents === 'function'
+    && typeof candidate.setContents === 'function'
+    && typeof candidate.clipboard?.dangerouslyPasteHTML === 'function'
+  )
+}
+
 function getSohuQuill(windowObject, editor) {
+  const candidates = []
+  let node = editor
+  for (let depth = 0; node && node !== editor.ownerDocument.body && depth < 5; depth += 1) {
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(node))) {
+      if ('value' in descriptor && isSohuQuill(descriptor.value)) {
+        candidates.push(descriptor.value)
+      }
+    }
+    node = node.parentElement
+  }
+
+  const ownQuill = candidates.find(isSohuQuill)
+  if (ownQuill) return ownQuill
+
   const container = editor.closest('.ql-container')
-  const quill = container?.__quill ?? windowObject.Quill?.find?.(container)
-  if (
-    !quill
-    || typeof quill.getContents !== 'function'
-    || typeof quill.setContents !== 'function'
-    || typeof quill.clipboard?.dangerouslyPasteHTML !== 'function'
-  ) {
+  const findQuill = windowObject.Quill?.find
+  if (typeof findQuill === 'function') {
+    for (const target of [editor, container]) {
+      if (!target) continue
+      try {
+        candidates.push(findQuill.call(windowObject.Quill, target, true))
+      } catch {
+        // Some microfrontend Quill bridges reject nodes they do not own.
+      }
+    }
+  }
+  const quill = candidates.find(isSohuQuill)
+  if (!quill) {
     throw new Error('无法取得搜狐 Quill 编辑器实例；页面结构可能已经变化')
   }
   return quill

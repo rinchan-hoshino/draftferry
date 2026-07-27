@@ -32,5 +32,8 @@ assert.match(
   panel.querySelector('[data-rin-status]')?.textContent ?? '',
   /搜狐号 · 稿渡 Preview/,
 )
-assert.ok(panel.querySelector('[data-rin-files][multiple]'))
+const fileInput = panel.querySelector('[data-rin-files][multiple]')
+assert.ok(fileInput)
+assert.equal(fileInput.style.getPropertyValue('display'), 'none')
+assert.equal(fileInput.style.getPropertyPriority('display'), 'important')
 console.log('verified built userscript UI fixture')

@@ -731,13 +731,43 @@ function isTencentDetailEditor(editor) {
   return false
 }
 
+function hasRenderedBox(element) {
+  const rect = element.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
+
+function isVisuallyAssociatedTencentField(label, editor) {
+  if (!hasRenderedBox(label) || !hasRenderedBox(editor)) return false
+  const labelRect = label.getBoundingClientRect()
+  const editorRect = editor.getBoundingClientRect()
+  const verticalOverlap = Math.min(labelRect.bottom, editorRect.bottom)
+    - Math.max(labelRect.top, editorRect.top)
+  const rowGap = Math.max(0, editorRect.left - labelRect.right)
+  const sameRow = verticalOverlap > 0
+    && labelRect.right <= editorRect.right
+    && rowGap <= 400
+  const horizontalOverlap = Math.min(labelRect.right, editorRect.right)
+    - Math.max(labelRect.left, editorRect.left)
+  const columnGap = editorRect.top - labelRect.bottom
+  const stacked = horizontalOverlap > 0 && columnGap >= 0 && columnGap <= 120
+  return sameRow || stacked
+}
+
 function findTencentDetailEditor(document) {
-  const candidates = [...document.querySelectorAll('.w-e-text[contenteditable="true"]')]
-    .filter(isTencentDetailEditor)
-  if (candidates.length !== 1) {
-    throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
-  }
-  return candidates[0]
+  const allEditors = [...document.querySelectorAll('.w-e-text[contenteditable="true"]')]
+  const associatedEditors = allEditors.filter(isTencentDetailEditor)
+  if (associatedEditors.length === 1) return associatedEditors[0]
+
+  const detailLabels = [...document.querySelectorAll('label, span, div')].filter((element) => (
+    normalizedLabelText(element) === '商品详情'
+    && (element.matches('label, span') || element.children.length === 0)
+  ))
+  const visualEditors = allEditors.filter((editor) => (
+    detailLabels.some((label) => isVisuallyAssociatedTencentField(label, editor))
+  ))
+  if (visualEditors.length === 1) return visualEditors[0]
+
+  throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
 }
 
 function dispatchTencentInput(windowObject, editor, inputType) {
