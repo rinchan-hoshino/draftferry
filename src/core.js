@@ -290,11 +290,46 @@ function getSohuQuill(windowObject, editor) {
       }
     }
   }
-  const quill = candidates.find(isSohuQuill)
-  if (!quill) {
-    throw new Error('无法取得搜狐 Quill 编辑器实例；页面结构可能已经变化')
-  }
-  return quill
+  return candidates.find(isSohuQuill) ?? null
+}
+
+function selectSohuEditorContents(windowObject, editor) {
+  const selection = windowObject.getSelection()
+  const range = editor.ownerDocument.createRange()
+  range.selectNodeContents(editor)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+async function pasteSohuHtml(windowObject, editor, html) {
+  if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
+  const transfer = new windowObject.DataTransfer()
+  const plainText = editor.ownerDocument.createElement('div')
+  plainText.innerHTML = html
+  transfer.setData('text/html', html)
+  transfer.setData('text/plain', plainText.textContent ?? '')
+  selectSohuEditorContents(windowObject, editor)
+  const before = editor.innerHTML
+  const event = new windowObject.ClipboardEvent('paste', {
+    bubbles: true,
+    cancelable: true,
+    clipboardData: transfer,
+  })
+  editor.dispatchEvent(event)
+  await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
+  if (editor.innerHTML !== before) return true
+
+  selectSohuEditorContents(windowObject, editor)
+  const inserted = editor.ownerDocument.execCommand?.('insertHTML', false, html) === true
+  if (!inserted || editor.innerHTML === before) return false
+  editor.dispatchEvent(new windowObject.InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertFromPaste',
+    data: null,
+  }))
+  editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
+  await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+  return editor.innerHTML !== before
 }
 
 function cloneDelta(windowObject, delta) {
@@ -337,8 +372,38 @@ export async function injectSohuArticle(document, article, options = {}) {
   confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(runtimeDocument))
 
   const quill = getSohuQuill(windowObject, editor)
-  const previousDelta = cloneDelta(windowObject, quill.getContents())
   const previousTitle = titleInput.value
+  if (!quill) {
+    const previousHtml = editor.innerHTML
+    try {
+      editor.focus()
+      if (!await pasteSohuHtml(windowObject, editor, article.html)) {
+        throw new Error('无法取得搜狐 Quill 编辑器实例，且原生粘贴或浏览器插入未被编辑器接管')
+      }
+      if (article.title) setInputValue(windowObject, titleInput, article.title)
+    } catch (error) {
+      try {
+        if (titleInput.value !== previousTitle) {
+          setInputValue(windowObject, titleInput, previousTitle)
+        }
+        if (editor.innerHTML !== previousHtml) {
+          const restored = editor.ownerDocument.execCommand?.('undo', false) === true
+          if (!restored || editor.innerHTML !== previousHtml) {
+            throw new Error('原生粘贴回滚后正文不一致', { cause: error })
+          }
+        }
+      } catch (rollbackError) {
+        throw new Error(
+          `搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+          { cause: rollbackError },
+        )
+      }
+      throw error
+    }
+    return { titleFilled: Boolean(article.title), bodyFilled: true }
+  }
+
+  const previousDelta = cloneDelta(windowObject, quill.getContents())
   try {
     editor.focus()
     quill.clipboard.dangerouslyPasteHTML(article.html, 'user')

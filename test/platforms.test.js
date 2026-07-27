@@ -139,10 +139,16 @@ test('后台首页不误判为编辑器，只在实测编辑路由激活', () =>
 test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传图片', async () => {
   const page = dom(`
     <input id="product-name" value="保留商品名称">
-    <div class="acpn-form-item">
-      <label class="acpn-form-label"><span aria-hidden="true">*</span> 产品详情：</label>
-      <div class="acpn-form-content">
+    <div class="next-form-item">
+      <label class="next-form-item-label"><span aria-hidden="true">*</span> 产品详情：</label>
+      <div class="next-form-item-control">
         <div class="cke_140 cke cke_editor_editor3"></div>
+      </div>
+    </div>
+    <div class="next-form-item">
+      <label class="next-form-item-label">服务说明：</label>
+      <div class="next-form-item-control">
+        <div class="cke_141 cke cke_editor_editor4"></div>
       </div>
     </div>
     <button id="save">保存</button><button id="publish">发布</button>
@@ -175,7 +181,17 @@ test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传�
     },
     focus() {},
   }
-  page.window.CKEDITOR = { instances: { editor3: editor } }
+  let unrelatedFires = 0
+  page.window.CKEDITOR = {
+    instances: {
+      editor3: editor,
+      editor4: {
+        getData: () => '<p>保留其他编辑器</p>',
+        setData() {},
+        fire() { unrelatedFires += 1 },
+      },
+    },
+  }
   page.window.document.querySelector('#save').onclick = () => { clicks += 1 }
   page.window.document.querySelector('#publish').onclick = () => { clicks += 1 }
 
@@ -185,6 +201,7 @@ test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传�
   assert.equal(result.titleFilled, false)
   assert.equal(currentHtml.includes('https://market.aliyun.com/uploaded.png'), true)
   assert.equal(page.window.document.querySelector('#product-name').value, '保留商品名称')
+  assert.equal(unrelatedFires, 0)
   assert.equal(clicks, 0)
 })
 
@@ -293,6 +310,48 @@ test('腾讯云市场接受与唯一编辑器分层的全局商品详情标签',
 
   assert.equal(result.platformId, 'tencent-market')
   assert.equal(editor.textContent, '只写商品详情')
+})
+
+test('腾讯云市场可在开放 ShadowRoot 中定位唯一商品详情编辑器', async () => {
+  const page = dom('<div id="market-root"></div>', 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+  const root = page.window.document.querySelector('#market-root').attachShadow({ mode: 'open' })
+  root.innerHTML = '<section><span>商品详情 *</span><div class="w-e-text" contenteditable="true"></div></section>'
+  const editor = root.querySelector('.w-e-text')
+  page.window.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    editor.innerHTML = html
+    return true
+  }
+
+  const result = await injectPlatformArticle(page.window.document, {
+    ...article,
+    html: '<p>Shadow 商品详情</p>',
+    portableMarkdown: 'Shadow 商品详情',
+  })
+
+  assert.equal(result.platformId, 'tencent-market')
+  assert.equal(editor.textContent, 'Shadow 商品详情')
+})
+
+test('腾讯云市场可在同源 iframe 中定位唯一商品详情编辑器', async () => {
+  const page = dom('<iframe></iframe>', 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+  const frame = page.window.document.querySelector('iframe')
+  frame.contentDocument.body.innerHTML = '<section><span>商品详情 *</span><div class="w-e-text" contenteditable="true"></div></section>'
+  const editor = frame.contentDocument.querySelector('.w-e-text')
+  frame.contentWindow.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    editor.innerHTML = html
+    return true
+  }
+
+  const result = await injectPlatformArticle(page.window.document, {
+    ...article,
+    html: '<p>iframe 商品详情</p>',
+    portableMarkdown: 'iframe 商品详情',
+  })
+
+  assert.equal(result.platformId, 'tencent-market')
+  assert.equal(editor.textContent, 'iframe 商品详情')
 })
 
 test('腾讯云市场拒绝与商品详情标签无结构或视觉关联的唯一编辑器', async () => {

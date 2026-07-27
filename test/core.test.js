@@ -221,14 +221,115 @@ test('搜狐可从编辑根节点属性或 Quill.find 向上查找实例', async
   assert.equal(bubbleEditor.textContent, '向上查找正文')
 })
 
-test('找不到真实 Quill 实例时在改动前失败', async () => {
+test('搜狐没有可见 Quill 实例时通过编辑器原生粘贴事件导入', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    editor.innerHTML = event.clipboardData.getData('text/html')
+  })
+
+  const result = await injectSohuArticle(window.document, {
+    title: '原生粘贴',
+    html: '<p>搜狐原生粘贴正文</p>',
+  })
+
+  assert.equal(result.bodyFilled, true)
+  assert.equal(window.document.querySelector('input').value, '原生粘贴')
+  assert.equal(editor.textContent, '搜狐原生粘贴正文')
+})
+
+test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 insertHTML', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  window.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    editor.innerHTML = html
+    return true
+  }
+
+  await injectSohuArticle(window.document, {
+    title: '浏览器插入',
+    html: '<p>MutationObserver 可见正文</p>',
+  })
+
+  assert.equal(editor.textContent, 'MutationObserver 可见正文')
+  assert.equal(window.document.querySelector('input').value, '浏览器插入')
+})
+
+test('搜狐原生粘贴后标题写入失败且无法 undo 时明确要求刷新且不要保存', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    editor.innerHTML = event.clipboardData.getData('text/html')
+  })
+  window.document.execCommand = () => false
+  const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
+  Object.defineProperty(window.HTMLInputElement.prototype, 'value', {
+    configurable: true,
+    get: descriptor.get,
+    set() { throw new Error('title setter failed') },
+  })
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '触发标题失败',
+      html: '<p>已改正文</p>',
+    }),
+    /搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存/,
+  )
+})
+
+test('找不到真实 Quill 实例且原生粘贴未被接管时在改动前失败', async () => {
   const dom = createSohuDom()
   await assert.rejects(
     injectSohuArticle(dom.window.document, {
       title: '不应写入标题',
       html: '<p>不应写入正文</p>',
     }),
-    /无法取得搜狐 Quill 编辑器实例/,
+    /无法取得搜狐 Quill 编辑器实例.*原生粘贴或浏览器插入未被编辑器接管/,
   )
   assert.equal(dom.window.document.querySelector('.ql-editor').innerHTML, '<p><br></p>')
   assert.equal(dom.window.document.querySelector('input').value, '')

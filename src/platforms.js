@@ -538,7 +538,7 @@ function findAliyunDetailEditor(document, windowObject = document.defaultView) {
   const label = [...document.querySelectorAll('label')].find((element) => (
     ['产品详情', '商品详情'].includes(normalizedLabelText(element))
   ))
-  const formItem = label?.closest('.acpn-form-item')
+  const formItem = label?.closest('.acpn-form-item, .next-form-item')
   const wrapper = formItem?.querySelector('.cke[class*="cke_editor_"]')
   const instanceClass = wrapper
     ? [...wrapper.classList].find((name) => /^cke_editor_.+/.test(name))
@@ -759,20 +759,49 @@ function isVisuallyAssociatedTencentField(label, editor) {
   return sameRow || stacked
 }
 
+function collectOpenEditorRoots(document) {
+  const roots = [document]
+  const seen = new Set(roots)
+  for (let index = 0; index < roots.length && roots.length < 100; index += 1) {
+    const root = roots[index]
+    for (const element of root.querySelectorAll('*')) {
+      if (element.shadowRoot && !seen.has(element.shadowRoot)) {
+        seen.add(element.shadowRoot)
+        roots.push(element.shadowRoot)
+      }
+      if (element.tagName === 'IFRAME') {
+        try {
+          const frameDocument = element.contentDocument
+          if (frameDocument && !seen.has(frameDocument)) {
+            seen.add(frameDocument)
+            roots.push(frameDocument)
+          }
+        } catch {
+          // Cross-origin frames cannot expose their editor DOM to this userscript.
+        }
+      }
+    }
+  }
+  return roots
+}
+
 function findTencentDetailEditor(document) {
-  const allEditors = [...document.querySelectorAll('.w-e-text[contenteditable="true"]')]
-  const associatedEditors = allEditors.filter(isTencentDetailEditor)
-  if (associatedEditors.length === 1) return associatedEditors[0]
+  const matches = new Set()
+  for (const root of collectOpenEditorRoots(document)) {
+    const allEditors = [...root.querySelectorAll('.w-e-text[contenteditable="true"]')]
+    for (const editor of allEditors.filter(isTencentDetailEditor)) matches.add(editor)
 
-  const detailLabels = [...document.querySelectorAll('label, span, div')].filter((element) => (
-    normalizedLabelText(element) === '商品详情'
-    && (element.matches('label, span') || element.children.length === 0)
-  ))
-  const visualEditors = allEditors.filter((editor) => (
-    detailLabels.some((label) => isVisuallyAssociatedTencentField(label, editor))
-  ))
-  if (visualEditors.length === 1) return visualEditors[0]
-
+    const detailLabels = [...root.querySelectorAll('label, span, div')].filter((element) => (
+      normalizedLabelText(element) === '商品详情'
+      && (element.matches('label, span') || element.children.length === 0)
+    ))
+    for (const editor of allEditors) {
+      if (detailLabels.some((label) => isVisuallyAssociatedTencentField(label, editor))) {
+        matches.add(editor)
+      }
+    }
+  }
+  if (matches.size === 1) return [...matches][0]
   throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
 }
 
@@ -951,12 +980,13 @@ function guardTencentRollback(windowObject, editor, previousHtml, durationMs) {
 }
 
 async function injectTencentMarket(document, article, options) {
-  const windowObject = options.pageWindow ?? document.defaultView
   const editor = findTencentDetailEditor(document)
+  const editorDocument = editor.ownerDocument
+  const windowObject = editorDocument.defaultView ?? options.pageWindow ?? document.defaultView
   const previousHtml = editor.innerHTML
   confirmPotentialOverwrite(windowObject, hasMeaningfulEditorContent(editor))
   const uploadTimeoutMs = options.imageUploadTimeoutMs ?? 30_000
-  const expectedImages = imageState(document, article.html).count
+  const expectedImages = imageState(editorDocument, article.html).count
   try {
     const preparedArticle = await prepareTencentArticle(
       windowObject,
