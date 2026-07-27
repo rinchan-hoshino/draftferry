@@ -1,5 +1,25 @@
 import { inspectOpenEditorRoots } from './dom-roots.js'
 
+const DIAGNOSTIC_TAG_CATEGORIES = new Set([
+  'article',
+  'body',
+  'div',
+  'form',
+  'iframe',
+  'input',
+  'label',
+  'main',
+  'p',
+  'section',
+  'span',
+  'textarea',
+])
+
+function diagnosticTagCategory(element) {
+  const tag = element?.tagName?.toLowerCase() ?? ''
+  return DIAGNOSTIC_TAG_CATEGORIES.has(tag) ? tag : 'other'
+}
+
 function roundedRect(element) {
   const rect = element.getBoundingClientRect()
   return {
@@ -28,7 +48,7 @@ function classSignals(element) {
 function structuralName(element) {
   if (!element) return null
   return {
-    tag: element.tagName?.toLowerCase() ?? null,
+    tag: diagnosticTagCategory(element),
     classCount: element.classList?.length ?? 0,
     classSignals: classSignals(element),
   }

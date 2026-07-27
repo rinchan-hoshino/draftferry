@@ -105,7 +105,7 @@ test('腾讯云诊断扫描页面主上下文、开放 ShadowRoot 和同源 ifra
   topEditor.getBoundingClientRect = () => ({ x: 100, y: 30, width: 800, height: 300 })
 
   const shadow = document.querySelector('#shadow-host').attachShadow({ mode: 'open' })
-  shadow.innerHTML = '<div class="PRIVATE-SHADOW-EDITOR" role="textbox" contenteditable="true">PRIVATE SHADOW</div>'
+  shadow.innerHTML = '<private-editor class="PRIVATE-SHADOW-EDITOR" role="textbox" contenteditable="true">PRIVATE SHADOW</private-editor>'
 
   const frame = document.querySelector('iframe')
   frame.contentDocument.body.innerHTML = '<textarea class="PRIVATE-FRAME-EDITOR">PRIVATE FRAME</textarea>'
@@ -137,9 +137,10 @@ test('腾讯云诊断扫描页面主上下文、开放 ShadowRoot 和同源 ifra
     result.tencent.roots[0].wangEditors[0].ancestors[0].classSignals.includes('contains-editor'),
     true,
   )
-  assert.equal(result.tencent.roots[1].editableCandidates[0].tag, 'div')
+  assert.equal(result.tencent.roots[1].editableCandidates[0].tag, 'other')
   assert.equal(result.tencent.roots[2].editableCandidates[0].tag, 'textarea')
   assert.equal(text.includes('PRIVATE'), false)
   assert.equal(text.includes('example.invalid'), false)
   assert.equal(text.includes('serviceprovider'), false)
+  assert.equal(text.includes('private-editor'), false)
 })
