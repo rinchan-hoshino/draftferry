@@ -11,24 +11,22 @@
 - 油猴安装文件：`draftferry.user.js`
 - 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前版本为 `0.3.8`；Tampermonkey 的更新与下载地址都固定到上述链接。
+产品名和链接不再随平台数量变化。当前版本为 `0.4.0`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
-| 平台 | 0.3.8 Preview 导入方式 |
+| 平台 | 0.4.0 Preview 导入方式 |
 | --- | --- |
-| 博客园 | 向 Markdown textarea 填入可移植 Markdown |
-| CSDN | 向 Markdown contenteditable 填入可移植 Markdown |
 | 知乎 | 先上传 Mermaid/本地图片，再粘贴可移植 Markdown，完成“确认并解析”和“确认” |
-| 微信公众号 | 使用 `mp_editor_set_content` 填入富文本 |
+| 微信公众号 | 清理列表空项与列表直属空白文本后，使用 `mp_editor_set_content` 填入富文本 |
 | 开源中国 | 用户先手动切到 MD 编辑器，再填入可移植 Markdown |
 | 百家号 | 使用 UEditor 填入正文，通过 contenteditable 填入标题 |
 | 今日头条 | 通过 ProseMirror `insertHTML` 填入富文本，并将图片交给平台粘贴上传流程 |
 | 搜狐号 | 使用 Quill 填入富文本 |
+| 阿里云市场 | 只向“产品详情”CKEditor 粘贴富文本，并交给平台 `uploadimage` 流程上传内嵌图片 |
+| 腾讯云市场 | 先通过商品详情 wangEditor 的图片粘贴流程上传内嵌图片，再只向“商品详情”粘贴富文本 |
 
-表中八项均已有可执行适配器和本地页面夹具，不再把占位报错算作适配；本地夹具已覆盖百家号、今日头条和搜狐号从同站后台通过 SPA 进入上述编辑路由后的面板挂载。真实登录页面兼容性和保存结果仍须逐站验收。
-
-阿里云、腾讯云不在当前范围内。
+表中八项均已有可执行适配器和本地页面夹具，不再把占位报错算作适配；本地夹具已覆盖百家号、今日头条和搜狐号从同站后台通过 SPA 进入上述编辑路由后的面板挂载。云市场适配器不会改商品名称或其他基础资料；图片上传失败会恢复原商品详情。真实登录页面兼容性和保存结果仍须逐站验收。
 
 ## 安装
 
@@ -56,7 +54,7 @@
 - 原始 Markdown 内嵌 HTML 先由 DOMPurify 清理；
 - 富文本平台接收带内联样式的 HTML；
 - Markdown 平台接收由清理后 HTML 重新生成的 GFM Markdown；
-- Mermaid 与本地图片在 Markdown 中先生成 data URL；知乎会在粘贴前上传并替换为知乎图片地址，其他 Markdown 平台是否接受仍需现场验证；
+- Mermaid 与本地图片在 Markdown 中先生成 data URL；知乎会在粘贴前上传并替换为知乎图片地址；阿里云市场交给 CKEditor `uploadimage`，腾讯云市场则先逐图调用 wangEditor 原生粘贴上传；
 - 平台写入接口返回后即视为导入完成，不比较平台最终生成的 HTML、样式或结构；
 - 标题或正文非空时会先弹出原生确认框；取消不改动页面，确认后沿用平台现有写入语义；
 - 稿渡仍不自动保存或发布。

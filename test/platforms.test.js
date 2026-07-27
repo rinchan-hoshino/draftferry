@@ -63,27 +63,27 @@ function zhihuFixture(onParse) {
 
 test('只注册已确认的八个平台', () => {
   assert.deepEqual(PLATFORM_IDS, [
-    'cnblogs',
-    'csdn',
     'zhihu',
     'wechat',
     'oschina',
     'baijiahao',
     'toutiao',
     'sohu',
+    'aliyun-market',
+    'tencent-market',
   ])
 })
 
 test('按当前页面 hostname 识别八个平台', () => {
   const cases = [
-    ['https://i.cnblogs.com/posts/edit', 'cnblogs'],
-    ['https://editor.csdn.net/md/', 'csdn'],
     ['https://zhuanlan.zhihu.com/write', 'zhihu'],
-    ['https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2', 'wechat'],
+    ['https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit', 'wechat'],
     ['https://my.oschina.net/u/1/blog/ai-write', 'oschina'],
     ['https://baijiahao.baidu.com/builder/rc/edit?type=news', 'baijiahao'],
     ['https://mp.toutiao.com/profile_v4/graphic/publish', 'toutiao'],
     ['https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle', 'sohu'],
+    ['https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862', 'aliyun-market'],
+    ['https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET', 'tencent-market'],
   ]
 
   for (const [url, expected] of cases) {
@@ -92,7 +92,7 @@ test('按当前页面 hostname 识别八个平台', () => {
   assert.equal(detectPlatform(new URL('https://example.com/')), null)
 })
 
-test('后台首页不误判为编辑器，只在三条实测发布路由激活', () => {
+test('后台首页不误判为编辑器，只在实测编辑路由激活', () => {
   const cases = [
     [
       'https://baijiahao.baidu.com/builder/rc/home',
@@ -111,6 +111,24 @@ test('后台首页不误判为编辑器，只在三条实测发布路由激活',
     ],
   ]
 
+  cases.push(
+    [
+      'https://mp.weixin.qq.com/cgi-bin/appmsg?action=list',
+      'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit',
+      'wechat',
+    ],
+    [
+      'https://msp.aliyun.com/msp/commodity/list',
+      'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862',
+      'aliyun-market',
+    ],
+    [
+      'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=OTHER',
+      'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET',
+      'tencent-market',
+    ],
+  )
+
   for (const [backgroundUrl, editorUrl, platformId] of cases) {
     assert.equal(detectPlatform(new URL(backgroundUrl)), null, backgroundUrl)
     assert.equal(detectPlatform(new URL(editorUrl))?.id, platformId, editorUrl)
@@ -118,36 +136,234 @@ test('后台首页不误判为编辑器，只在三条实测发布路由激活',
   }
 })
 
-test('博客园空白 Markdown 编辑器可填入且不点击保存发布', async () => {
+test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传图片', async () => {
   const page = dom(`
-    <input id="post-title" placeholder="标题">
-    <textarea id="md-editor"></textarea>
+    <input id="product-name" value="保留商品名称">
+    <div class="acpn-form-item">
+      <label class="acpn-form-label">产品详情：</label>
+      <div class="acpn-form-content">
+        <div class="cke_140 cke cke_editor_editor3"></div>
+      </div>
+    </div>
     <button id="save">保存</button><button id="publish">发布</button>
-  `, 'https://i.cnblogs.com/posts/edit')
+  `, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  let currentHtml = ''
   let clicks = 0
-  page.window.confirm = () => { throw new Error('空白文章不应弹出覆盖确认') }
+  let uploadResponse
+  const editor = {
+    getData: () => currentHtml,
+    setData(html, options) {
+      currentHtml = html
+      options?.callback?.()
+    },
+    on(name, handler) {
+      assert.equal(name, 'fileUploadResponse')
+      uploadResponse = handler
+    },
+    removeListener(name, handler) {
+      assert.equal(name, 'fileUploadResponse')
+      if (uploadResponse === handler) uploadResponse = null
+    },
+    fire(name, data) {
+      assert.equal(name, 'paste')
+      assert.equal(data.type, 'html')
+      currentHtml = data.dataValue.replace(
+        'data:image/png;base64,eA==',
+        'https://market.aliyun.com/uploaded.png',
+      )
+      uploadResponse({ data: { fileLoader: { xhr: { status: 200 } } } })
+    },
+    focus() {},
+  }
+  page.window.CKEDITOR = { instances: { editor3: editor } }
   page.window.document.querySelector('#save').onclick = () => { clicks += 1 }
   page.window.document.querySelector('#publish').onclick = () => { clicks += 1 }
 
   const result = await injectPlatformArticle(page.window.document, article)
 
-  assert.equal(result.platformId, 'cnblogs')
-  assert.equal(page.window.document.querySelector('#post-title').value, article.title)
-  assert.equal(page.window.document.querySelector('#md-editor').value, article.portableMarkdown)
+  assert.equal(result.platformId, 'aliyun-market')
+  assert.equal(result.titleFilled, false)
+  assert.equal(currentHtml.includes('https://market.aliyun.com/uploaded.png'), true)
+  assert.equal(page.window.document.querySelector('#product-name').value, '保留商品名称')
   assert.equal(clicks, 0)
 })
 
-test('CSDN 空白 Markdown contenteditable 可填入', async () => {
+test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async () => {
   const page = dom(`
-    <div class="article-bar__title"><input placeholder="标题"></div>
-    <pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>
-  `, 'https://editor.csdn.net/md/')
+    <input id="product-name" value="保留商品名称">
+    <div class="other-detail"><span>客户案例</span>
+      <div class="w-e-text" contenteditable="true"></div>
+    </div>
+    <div class="market-detail"><span>商品详情</span>
+      <div class="w-e-text" contenteditable="true"></div>
+    </div>
+    <button id="save">保存</button><button id="publish">发布</button>
+  `, 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+  const { window } = page
+  const editor = window.document.querySelector('.market-detail .w-e-text')
+  let clicks = 0
+  class FakeDataTransfer {
+    #data = new Map()
+    items = []
+    constructor() {
+      this.items.add = (file) => this.items.push({
+        type: file.type,
+        getAsFile: () => file,
+      })
+    }
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    const html = event.clipboardData.getData('text/html')
+    editor.innerHTML = html || '<img src="https://market.cloud.tencent.com/uploaded.png">'
+  })
+  window.document.querySelector('#save').onclick = () => { clicks += 1 }
+  window.document.querySelector('#publish').onclick = () => { clicks += 1 }
 
-  const result = await injectPlatformArticle(page.window.document, article)
+  const result = await injectPlatformArticle(window.document, article)
 
-  assert.equal(result.platformId, 'csdn')
-  assert.equal(page.window.document.querySelector('input').value, article.title)
-  assert.equal(page.window.document.querySelector('pre').textContent, article.portableMarkdown)
+  assert.equal(result.platformId, 'tencent-market')
+  assert.equal(result.titleFilled, false)
+  assert.equal(editor.querySelector('img').src, 'https://market.cloud.tencent.com/uploaded.png')
+  assert.equal(window.document.querySelector('#product-name').value, '保留商品名称')
+  assert.equal(clicks, 0)
+})
+
+test('云市场内嵌图片未上传时恢复原商品详情', async () => {
+  const aliyun = dom(`
+    <div class="acpn-form-item"><label>产品详情：</label>
+      <div class="cke cke_editor_editor3"></div>
+    </div>
+  `, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  let aliyunHtml = '<p>原阿里云详情</p>'
+  let aliyunUploadResponse
+  let aliyunAborts = 0
+  aliyun.window.confirm = () => true
+  aliyun.window.CKEDITOR = { instances: { editor3: {
+    getData: () => aliyunHtml,
+    setData(html, options) { aliyunHtml = html; options?.callback?.() },
+    on(_name, handler) { aliyunUploadResponse = handler },
+    removeListener(_name, handler) {
+      if (aliyunUploadResponse === handler) aliyunUploadResponse = null
+    },
+    fire(_name, data) {
+      aliyunHtml = data.dataValue.replace(
+        'data:image/png;base64,eA==',
+        '<broken-image-without-url>',
+      )
+      aliyunUploadResponse({ data: { fileLoader: { xhr: { status: 200 } } } })
+    },
+    uploadRepository: { loaders: { first: { abort() { aliyunAborts += 1 } } } },
+    focus() {},
+  } } }
+
+  await assert.rejects(
+    injectPlatformArticle(aliyun.window.document, article, { imageUploadTimeoutMs: 20 }),
+    /阿里云市场：内嵌图片没有完成平台上传/,
+  )
+  assert.equal(aliyunHtml, '<p>原阿里云详情</p>')
+  assert.equal(aliyunAborts, 1)
+
+  const tencent = dom(
+    '<div><span>商品详情</span><div class="w-e-text" contenteditable="true"><p>原腾讯云详情</p></div></div>',
+    'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET',
+  )
+  const { window } = tencent
+  const editor = window.document.querySelector('.w-e-text')
+  window.confirm = () => true
+  class FakeDataTransfer {
+    #data = new Map()
+    items = []
+    constructor() {
+      this.items.add = (file) => this.items.push({
+        type: file.type,
+        getAsFile: () => file,
+      })
+    }
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) { super(type, init); this.clipboardData = init.clipboardData }
+  }
+  let tencentAborts = 0
+  window.XMLHttpRequest = class {
+    send() {}
+    abort() { tencentAborts += 1 }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    const html = event.clipboardData.getData('text/html')
+    if (html) {
+      editor.innerHTML = html
+      return
+    }
+    const file = event.clipboardData.items[0].getAsFile()
+    window.setTimeout(() => {
+      const request = new window.XMLHttpRequest()
+      const formData = new window.FormData()
+      formData.append('file', file)
+      request.send(formData)
+    }, 10)
+    window.setTimeout(() => {
+      editor.innerHTML = '<img src="https://market.cloud.tencent.com/late.png">'
+    }, 40)
+  })
+
+  await assert.rejects(
+    injectPlatformArticle(window.document, article, {
+      imageUploadTimeoutMs: 20,
+      rollbackGuardMs: 100,
+    }),
+    /腾讯云市场：第 1 张内嵌图片上传超时/,
+  )
+  await new Promise((resolve) => window.setTimeout(resolve, 80))
+  assert.equal(tencentAborts, 1)
+  assert.equal(editor.innerHTML, '<p>原腾讯云详情</p>')
+})
+
+test('阿里云市场原详情恢复失败时给出不可保存的明确错误', async () => {
+  const page = dom(`
+    <div class="acpn-form-item"><label>产品详情：</label>
+      <div class="cke cke_editor_editor3"></div>
+    </div>
+  `, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  let currentHtml = '<p>原详情</p>'
+  let uploadResponse
+  page.window.confirm = () => true
+  page.window.CKEDITOR = { instances: { editor3: {
+    getData: () => currentHtml,
+    setData(html, options) {
+      if (html === '<p>原详情</p>' && currentHtml !== '<p>原详情</p>') {
+        throw new Error('restore failed')
+      }
+      currentHtml = html
+      options?.callback?.()
+    },
+    on(_name, handler) { uploadResponse = handler },
+    removeListener() { uploadResponse = null },
+    fire() {
+      uploadResponse({ data: { fileLoader: { xhr: { status: 500 } } } })
+    },
+    focus() {},
+  } } }
+
+  await assert.rejects(
+    injectPlatformArticle(page.window.document, article),
+    /导入失败，且无法恢复原产品详情；请刷新页面且不要保存/,
+  )
 })
 
 test('开源中国在已切换的空白 Markdown textarea 中填入', async () => {
@@ -199,6 +415,34 @@ test('微信公众号只使用正文 ProseMirror 和编辑器 JSAPI', async () =
   assert.equal(page.window.document.querySelector('.title-editor__input .ProseMirror').textContent, '')
 })
 
+test('微信公众号导入前清理有序列表中的空编号', async () => {
+  const page = dom(`
+    <textarea id="title"></textarea>
+    <div id="body"><div class="ProseMirror"><p><br></p></div></div>
+  `, 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2')
+  let insertedHtml = ''
+  page.window.__MP_Editor_JSAPI__ = {
+    invoke({ apiParam, sucCb }) {
+      insertedHtml = apiParam.content
+      sucCb()
+    },
+  }
+  const listArticle = {
+    ...article,
+    html: '<h2>对接说明</h2><ol>\n<li><br></li>\n<li>客户资料同步</li>\n<li><p><br></p></li>\n<li><img src="https://example.com/flow.png"></li>\n</ol>',
+  }
+
+  await injectPlatformArticle(page.window.document, listArticle)
+
+  const inserted = new page.window.DOMParser().parseFromString(insertedHtml, 'text/html')
+  const list = inserted.querySelector('ol')
+  const items = [...list.querySelectorAll(':scope > li')]
+  assert.equal(items.length, 2)
+  assert.deepEqual([...list.childNodes].map((node) => node.nodeType), [1, 1])
+  assert.equal(items[0].textContent, '客户资料同步')
+  assert.equal(items[1].querySelector('img')?.src, 'https://example.com/flow.png')
+})
+
 test('微信公众号接受平台改写后的正文且不回滚', async () => {
   const page = dom(`
     <textarea id="title"></textarea>
@@ -247,42 +491,19 @@ test('百家号通过 UEditor 和 contenteditable 标题填入', async () => {
   assert.equal(contentChanges, 1)
 })
 
-test('三个 Markdown 编辑器都接受平台改写后的内容且不回滚', async () => {
-  const cases = [
-    {
-      url: 'https://i.cnblogs.com/posts/edit',
-      html: '<input id="post-title" placeholder="标题"><textarea id="md-editor"></textarea>',
-      body: '#md-editor',
-      title: '#post-title',
-    },
-    {
-      url: 'https://editor.csdn.net/md/',
-      html: '<div class="article-bar__title"><input placeholder="标题"></div><pre class="editor__inner markdown-highlighting" contenteditable="true"></pre>',
-      body: 'pre',
-      title: 'input',
-    },
-    {
-      url: 'https://my.oschina.net/u/1/blog/ai-write',
-      html: '<input placeholder="标题"><textarea></textarea>',
-      body: 'textarea',
-      title: 'input',
-    },
-  ]
+test('开源中国接受平台改写后的内容且不回滚', async () => {
+  const page = dom(
+    '<input placeholder="标题"><textarea></textarea>',
+    'https://my.oschina.net/u/1/blog/ai-write',
+  )
+  const body = page.window.document.querySelector('textarea')
+  body.addEventListener('input', () => { body.value = '平台保留的 Markdown' })
 
-  for (const item of cases) {
-    const page = dom(item.html, item.url)
-    const body = page.window.document.querySelector(item.body)
-    body.addEventListener('input', () => {
-      if ('value' in body) body.value = '平台保留的 Markdown'
-      else body.textContent = '平台保留的 Markdown'
-    })
+  const result = await injectPlatformArticle(page.window.document, article)
 
-    const result = await injectPlatformArticle(page.window.document, article)
-
-    assert.equal(result.bodyFilled, true)
-    assert.equal('value' in body ? body.value : body.textContent, '平台保留的 Markdown')
-    assert.equal(page.window.document.querySelector(item.title).value, article.title)
-  }
+  assert.equal(result.bodyFilled, true)
+  assert.equal(body.value, '平台保留的 Markdown')
+  assert.equal(page.window.document.querySelector('input').value, article.title)
 })
 
 test('知乎先上传 data URL 图片，再用远程 URL 解析 Markdown', async () => {
@@ -565,9 +786,9 @@ test('今日头条接受 ProseMirror 改写后的正文且不回滚', async () =
 
 test('已有 Markdown 文章确认后继续现有导入流程', async () => {
   const page = dom(`
-    <input id="post-title" value="已有标题">
+    <input id="post-title" placeholder="标题" value="已有标题">
     <textarea id="md-editor">已有正文</textarea>
-  `, 'https://i.cnblogs.com/posts/edit')
+  `, 'https://my.oschina.net/u/1/blog/ai-write')
   let confirms = 0
   page.window.confirm = () => {
     confirms += 1
@@ -576,13 +797,13 @@ test('已有 Markdown 文章确认后继续现有导入流程', async () => {
 
   const result = await injectPlatformArticle(page.window.document, article)
 
-  assert.equal(result.platformId, 'cnblogs')
+  assert.equal(result.platformId, 'oschina')
   assert.equal(confirms, 1)
   assert.equal(page.window.document.querySelector('#post-title').value, article.title)
   assert.equal(page.window.document.querySelector('#md-editor').value, article.portableMarkdown)
 })
 
-test('七个平台已有内容时取消确认不会修改页面', async () => {
+test('五个文章平台已有内容时取消确认不会修改页面', async () => {
   let baijiahaoSetCalls = 0
   const baijiahao = dom(`
     <div class="client_components_titleInput"><div contenteditable="true"></div></div>
@@ -596,8 +817,6 @@ test('七个平台已有内容时取消确认不会修改页面', async () => {
     },
   }
   const pages = [
-    dom('<input id="post-title" value="已有标题"><textarea id="md-editor"></textarea>', 'https://i.cnblogs.com/posts/edit'),
-    dom('<div class="article-bar__title"><input></div><pre class="editor__inner" contenteditable="true"><img src="existing.png"></pre>', 'https://editor.csdn.net/md/'),
     dom('<textarea placeholder="标题">已有标题</textarea><div class="public-DraftEditor-content" contenteditable="true"></div>', 'https://zhuanlan.zhihu.com/write'),
     dom('<textarea id="title">已有标题</textarea><div class="ProseMirror"><p><br></p></div>', 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2'),
     dom('<input placeholder="标题"><textarea>已有正文</textarea>', 'https://my.oschina.net/u/1/blog/ai-write'),

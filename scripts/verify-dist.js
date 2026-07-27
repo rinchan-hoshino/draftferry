@@ -25,14 +25,14 @@ assert.ok(artifact.includes(`// @downloadURL  ${canonicalUrl}`))
 assert.equal((artifact.match(/^\/\/ @updateURL\s+/gm) ?? []).length, 1)
 assert.equal((artifact.match(/^\/\/ @downloadURL\s+/gm) ?? []).length, 1)
 const expectedMatches = [
-  'https://i.cnblogs.com/posts/edit*',
-  'https://editor.csdn.net/md/*',
   'https://zhuanlan.zhihu.com/write*',
   'https://mp.weixin.qq.com/cgi-bin/appmsg*',
   'https://my.oschina.net/*/blog/ai-write*',
   'https://baijiahao.baidu.com/*',
   'https://mp.toutiao.com/*',
   'https://mp.sohu.com/*',
+  'https://msp.aliyun.com/msp/commodity/list/*',
+  'https://console.cloud.tencent.com/serviceprovider/products/createNew*',
 ]
 for (const match of expectedMatches) {
   assert.ok(artifact.includes(`// @match        ${match}`), `缺少 @match ${match}`)

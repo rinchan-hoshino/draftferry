@@ -64,7 +64,7 @@ function disableAutomaticMutationCallbacks(dom) {
   }
 }
 
-test('三个后台通过 SPA 进入真实编辑路由时才挂载面板', async () => {
+test('四个后台通过 SPA 进入真实编辑路由时才挂载面板', async () => {
   const cases = [
     {
       listUrl: 'https://baijiahao.baidu.com/builder/rc/home',
@@ -77,6 +77,10 @@ test('三个后台通过 SPA 进入真实编辑路由时才挂载面板', async 
     {
       listUrl: 'https://mp.sohu.com/mpfe/v4/contentManagement/news/list',
       editorPath: '/mpfe/v4/contentManagement/news/addarticle?contentStatus=1',
+    },
+    {
+      listUrl: 'https://mp.weixin.qq.com/cgi-bin/appmsg?action=list',
+      editorPath: '/cgi-bin/appmsg?t=media/appmsg_edit_v2&action=edit',
     },
   ]
 

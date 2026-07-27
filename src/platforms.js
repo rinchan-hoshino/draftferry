@@ -5,10 +5,16 @@ import {
 } from './core.js'
 
 const PLATFORMS = [
-  { id: 'cnblogs', name: '博客园', hosts: ['cnblogs.com'] },
-  { id: 'csdn', name: 'CSDN', hosts: ['csdn.net'] },
   { id: 'zhihu', name: '知乎', hosts: ['zhihu.com'] },
-  { id: 'wechat', name: '微信公众号', hosts: ['mp.weixin.qq.com'] },
+  {
+    id: 'wechat',
+    name: '微信公众号',
+    hosts: ['mp.weixin.qq.com'],
+    editorUrl: (url) => (
+      /^\/cgi-bin\/appmsg\/?$/.test(url.pathname)
+      && url.searchParams.get('t') === 'media/appmsg_edit_v2'
+    ),
+  },
   { id: 'oschina', name: '开源中国', hosts: ['oschina.net'] },
   {
     id: 'baijiahao',
@@ -28,6 +34,24 @@ const PLATFORMS = [
     hosts: ['mp.sohu.com'],
     editorPath: /^\/mpfe\/v4\/contentManagement\/news\/addarticle\/?$/,
   },
+  {
+    id: 'aliyun-market',
+    name: '阿里云市场',
+    hosts: ['msp.aliyun.com'],
+    editorUrl: (url) => (
+      /^\/msp\/commodity\/list\/~\/publish\/basic\/?$/.test(url.pathname)
+      && Boolean(url.searchParams.get('commodityId'))
+    ),
+  },
+  {
+    id: 'tencent-market',
+    name: '腾讯云市场',
+    hosts: ['console.cloud.tencent.com'],
+    editorUrl: (url) => (
+      /^\/serviceprovider\/products\/createNew\/?$/.test(url.pathname)
+      && url.searchParams.get('productType') === 'MARKET'
+    ),
+  },
 ]
 
 export const PLATFORM_IDS = PLATFORMS.map((platform) => platform.id)
@@ -41,9 +65,11 @@ function hostnameMatches(hostname, expected) {
 }
 
 export function detectPlatform(url) {
+  const normalizedUrl = url.searchParams ? url : new URL(url.href)
   return PLATFORMS.find((platform) => (
-    platform.hosts.some((host) => hostnameMatches(url.hostname, host))
-    && (!platform.editorPath || platform.editorPath.test(url.pathname))
+    platform.hosts.some((host) => hostnameMatches(normalizedUrl.hostname, host))
+    && (!platform.editorPath || platform.editorPath.test(normalizedUrl.pathname))
+    && (!platform.editorUrl || platform.editorUrl(normalizedUrl))
   )) ?? null
 }
 
@@ -159,6 +185,26 @@ function parseHtml(document, html) {
   return container
 }
 
+function prepareWechatHtml(document, html) {
+  const container = parseHtml(document, html)
+  for (const item of container.querySelectorAll('li')) {
+    if (!hasMeaningfulEditorContent(item)) {
+      item.remove()
+    }
+  }
+  for (const list of container.querySelectorAll('ol, ul')) {
+    for (const node of [...list.childNodes]) {
+      if (node.nodeType === 3 && !node.textContent.trim()) {
+        node.remove()
+      }
+    }
+    if (!list.querySelector('li')) {
+      list.remove()
+    }
+  }
+  return container.innerHTML
+}
+
 function pickWechatBodyEditor(document) {
   const titleEditor = document.querySelector('.title-editor__input .ProseMirror')
   const candidates = [...document.querySelectorAll('.ProseMirror')]
@@ -215,7 +261,8 @@ async function injectWechat(document, article) {
     throw new Error('微信公众号：未找到 mp_editor_set_content 接口，待真实页面确认')
   }
 
-  await invokeWechatEditor(windowObject, article.html)
+  const preparedHtml = prepareWechatHtml(document, article.html)
+  await invokeWechatEditor(windowObject, preparedHtml)
   writeControl(windowObject, titleControl, article.title)
 
   return {
@@ -337,10 +384,10 @@ async function waitForButton(
   })
 }
 
-function dataImageUrlToBlob(windowObject, source) {
+function dataImageUrlToBlob(windowObject, source, platformName = '知乎') {
   const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i)
   if (!match) {
-    throw new Error('知乎：内嵌图片不是有效的 Base64 图片')
+    throw new Error(`${platformName}：内嵌图片不是有效的 Base64 图片`)
   }
   const binary = windowObject.atob(match[2])
   const bytes = windowObject.Uint8Array.from(binary, (character) => character.charCodeAt(0))
@@ -477,19 +524,437 @@ async function injectZhihu(document, article, options) {
   return { platformId: 'zhihu', titleFilled: Boolean(article.title), bodyFilled: true, mode: 'markdown-import' }
 }
 
+function normalizedLabelText(element) {
+  return element.textContent?.replace(/\s+/g, '').replace(/[：:]$/, '') ?? ''
+}
+
+function findAliyunDetailEditor(document) {
+  const label = [...document.querySelectorAll('label')].find((element) => (
+    ['产品详情', '商品详情'].includes(normalizedLabelText(element))
+  ))
+  const formItem = label?.closest('.acpn-form-item')
+  const wrapper = formItem?.querySelector('.cke[class*="cke_editor_"]')
+  const instanceClass = wrapper
+    ? [...wrapper.classList].find((name) => /^cke_editor_.+/.test(name))
+    : null
+  const instanceName = instanceClass?.replace(/^cke_editor_/, '')
+  const editor = instanceName
+    ? document.defaultView.CKEDITOR?.instances?.[instanceName]
+    : null
+  if (!label || !formItem || !wrapper || !editor) {
+    throw new Error('阿里云市场：未找到“产品详情”CKEditor 实例')
+  }
+  if (
+    typeof editor.getData !== 'function'
+    || typeof editor.setData !== 'function'
+    || typeof editor.fire !== 'function'
+  ) {
+    throw new Error('阿里云市场：产品详情 CKEditor 接口不完整')
+  }
+  return editor
+}
+
+function setCkEditorData(windowObject, editor, html) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      windowObject.clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = windowObject.setTimeout(
+      () => finish(new Error('阿里云市场：产品详情编辑器响应超时')),
+      5000,
+    )
+    try {
+      editor.setData(html, { callback: () => finish() })
+    } catch (error) {
+      finish(error)
+    }
+  })
+}
+
+function isUploadedImageSource(document, source) {
+  if (!/^(?:https?:)?\/\//i.test(source)) return false
+  try {
+    return /^https?:$/.test(new document.defaultView.URL(source, document.location.href).protocol)
+  } catch {
+    return false
+  }
+}
+
+function imageState(document, html) {
+  const container = parseHtml(document, html)
+  const images = [...container.querySelectorAll('img')]
+  const sources = images.map((image) => image.getAttribute('src')?.trim() ?? '')
+  return {
+    count: images.length,
+    embeddedCount: sources.filter((source) => /^data:image\//i.test(source)).length,
+    pending: images.some((image) => (
+      /^(?:data:image\/|blob:)/i.test(image.getAttribute('src')?.trim() ?? '')
+      || /^(?:data:image\/|blob:)/i.test(image.getAttribute('data-cke-saved-src')?.trim() ?? '')
+    )),
+    valid: sources.every((source) => isUploadedImageSource(document, source)),
+  }
+}
+
+async function waitForCloudImages(windowObject, readHtml, expectedCount, platformName, timeoutMs) {
+  if (expectedCount === 0) return
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const state = imageState(windowObject.document, readHtml())
+    if (state.count >= expectedCount && !state.pending && state.valid) return
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 100))
+  }
+  throw new Error(`${platformName}：内嵌图片没有完成平台上传`)
+}
+
+function abortAliyunUploads(editor) {
+  const loaders = Object.values(editor.uploadRepository?.loaders ?? {})
+  for (const loader of loaders) loader.abort?.()
+}
+
+function observeAliyunUploadResponses(windowObject, editor, expectedCount, timeoutMs) {
+  if (expectedCount === 0) {
+    return { promise: Promise.resolve(), cancel() {} }
+  }
+  if (typeof editor.on !== 'function' || typeof editor.removeListener !== 'function') {
+    throw new Error('阿里云市场：无法监听产品详情图片上传状态')
+  }
+  let cancel = () => {}
+  const promise = new Promise((resolve, reject) => {
+    let completed = 0
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      windowObject.clearTimeout(timer)
+      editor.removeListener('fileUploadResponse', onResponse)
+      if (error) reject(error)
+      else resolve()
+    }
+    cancel = () => finish()
+    const onResponse = (event) => {
+      const status = event?.data?.fileLoader?.xhr?.status
+      const message = event?.data?.message
+      if (message || (Number.isFinite(status) && status >= 400)) {
+        finish(new Error(`阿里云市场：图片上传失败${message ? `：${message}` : `（HTTP ${status}）`}`))
+        return
+      }
+      completed += 1
+      if (completed >= expectedCount) finish()
+    }
+    const timer = windowObject.setTimeout(
+      () => finish(new Error('阿里云市场：图片上传响应超时')),
+      timeoutMs,
+    )
+    editor.on('fileUploadResponse', onResponse)
+  })
+  return { promise, cancel }
+}
+
+async function injectAliyunMarket(document, article, options) {
+  const windowObject = document.defaultView
+  const editor = findAliyunDetailEditor(document)
+  const previousHtml = editor.getData() ?? ''
+  confirmPotentialOverwrite(
+    windowObject,
+    hasMeaningfulEditorContent(parseHtml(document, previousHtml)),
+  )
+  const articleImages = imageState(document, article.html)
+  const expectedImages = articleImages.count
+  let uploadObservation
+  try {
+    await setCkEditorData(windowObject, editor, '')
+    uploadObservation = observeAliyunUploadResponses(
+      windowObject,
+      editor,
+      articleImages.embeddedCount,
+      options.imageUploadTimeoutMs ?? 30_000,
+    )
+    editor.focus?.()
+    editor.fire('paste', {
+      type: 'html',
+      method: 'paste',
+      dataValue: article.html,
+    })
+    await uploadObservation.promise
+    await waitForCloudImages(
+      windowObject,
+      () => editor.getData() ?? '',
+      expectedImages,
+      '阿里云市场',
+      options.imageUploadTimeoutMs ?? 30_000,
+    )
+  } catch (error) {
+    uploadObservation?.cancel()
+    abortAliyunUploads(editor)
+    try {
+      await setCkEditorData(windowObject, editor, previousHtml)
+      if ((editor.getData() ?? '') !== previousHtml) {
+        throw new Error('恢复后内容与原产品详情不一致', { cause: error })
+      }
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        '阿里云市场：导入失败，且无法恢复原产品详情；请刷新页面且不要保存',
+        { cause: restoreError },
+      )
+    }
+    throw error
+  }
+  return {
+    platformId: 'aliyun-market',
+    titleFilled: false,
+    bodyFilled: true,
+    mode: 'html-paste',
+  }
+}
+
+function isTencentDetailEditor(editor) {
+  let ancestor = editor.parentElement
+  for (
+    let depth = 0;
+    ancestor && ancestor !== editor.ownerDocument.body && depth < 6;
+    depth += 1
+  ) {
+    const hasLabel = [...ancestor.querySelectorAll('label, span, div')].some((element) => (
+      element !== editor
+      && !editor.contains(element)
+      && normalizedLabelText(element) === '商品详情'
+    ))
+    if (hasLabel) return true
+    ancestor = ancestor.parentElement
+  }
+  return false
+}
+
+function findTencentDetailEditor(document) {
+  const candidates = [...document.querySelectorAll('.w-e-text[contenteditable="true"]')]
+    .filter(isTencentDetailEditor)
+  if (candidates.length !== 1) {
+    throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
+  }
+  return candidates[0]
+}
+
+function dispatchTencentInput(windowObject, editor, inputType) {
+  editor.dispatchEvent(new windowObject.InputEvent('input', {
+    bubbles: true,
+    inputType,
+  }))
+}
+
+function selectTencentEditor(windowObject, editor, collapseToEnd = false) {
+  editor.focus()
+  const selection = windowObject.getSelection()
+  const range = windowObject.document.createRange()
+  range.selectNodeContents(editor)
+  range.collapse(collapseToEnd)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function formDataContainsFile(windowObject, body, fileName) {
+  return body instanceof windowObject.FormData && [...body.values()].some((value) => (
+    value instanceof windowObject.File && value.name === fileName
+  ))
+}
+
+function captureTencentUploadRequests(windowObject, fileName) {
+  const requests = []
+  const controllers = []
+  const xhrPrototype = windowObject.XMLHttpRequest?.prototype
+  const originalSend = xhrPrototype?.send
+  const originalFetch = windowObject.fetch
+  if (originalSend) {
+    xhrPrototype.send = function (body) {
+      if (formDataContainsFile(windowObject, body, fileName)) requests.push(this)
+      return originalSend.call(this, body)
+    }
+  }
+  if (typeof originalFetch === 'function' && windowObject.AbortController) {
+    windowObject.fetch = (input, init = {}) => {
+      if (init.signal || !formDataContainsFile(windowObject, init.body, fileName)) {
+        return originalFetch.call(windowObject, input, init)
+      }
+      const controller = new windowObject.AbortController()
+      controllers.push(controller)
+      return originalFetch.call(windowObject, input, { ...init, signal: controller.signal })
+    }
+  }
+  return {
+    stop() {
+      if (originalSend) xhrPrototype.send = originalSend
+      if (typeof originalFetch === 'function') windowObject.fetch = originalFetch
+    },
+    abort() {
+      for (const request of requests) request.abort?.()
+      for (const controller of controllers) controller.abort()
+    },
+  }
+}
+
+async function uploadTencentDataImage(windowObject, editor, source, index, timeoutMs) {
+  if (
+    !windowObject.DataTransfer
+    || !windowObject.ClipboardEvent
+    || !windowObject.File
+  ) {
+    throw new Error('腾讯云市场：浏览器缺少图片粘贴上传接口')
+  }
+  const blob = dataImageUrlToBlob(windowObject, source, '腾讯云市场')
+  const extension = imageFileExtension(blob.type)
+  const fileName = `draftferry-${index + 1}.${extension}`
+  const file = new windowObject.File([blob], fileName, { type: blob.type })
+  const transfer = new windowObject.DataTransfer()
+  if (typeof transfer.items?.add !== 'function') {
+    throw new Error('腾讯云市场：浏览器缺少图片剪贴板接口')
+  }
+
+  editor.innerHTML = '<p><br></p>'
+  dispatchTencentInput(windowObject, editor, 'deleteContent')
+  selectTencentEditor(windowObject, editor, true)
+  transfer.items.add(file)
+  const requestCapture = captureTencentUploadRequests(windowObject, fileName)
+  try {
+    editor.dispatchEvent(new windowObject.ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: transfer,
+    }))
+
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const uploaded = [...editor.querySelectorAll('img')].find((image) => (
+        /^https?:/i.test(image.src)
+      ))
+      if (uploaded) return uploaded.src
+      await new Promise((resolve) => windowObject.setTimeout(resolve, 100))
+    }
+    requestCapture.abort()
+    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+    throw new Error(`腾讯云市场：第 ${index + 1} 张内嵌图片上传超时`)
+  } finally {
+    requestCapture.stop()
+  }
+}
+
+async function prepareTencentArticle(windowObject, editor, article, timeoutMs) {
+  const container = parseHtml(windowObject.document, article.html)
+  const sources = [...container.querySelectorAll('img')]
+    .map((image) => image.getAttribute('src')?.trim() ?? '')
+    .filter((source) => /^data:image\//i.test(source))
+  const uploadedUrls = new Map()
+  for (const source of sources) {
+    if (!uploadedUrls.has(source)) {
+      uploadedUrls.set(
+        source,
+        await uploadTencentDataImage(
+          windowObject,
+          editor,
+          source,
+          uploadedUrls.size,
+          timeoutMs,
+        ),
+      )
+    }
+  }
+  let html = article.html
+  let portableMarkdown = article.portableMarkdown
+  for (const [source, uploadedUrl] of uploadedUrls) {
+    html = html.replaceAll(source, uploadedUrl)
+    portableMarkdown = portableMarkdown.replaceAll(source, uploadedUrl)
+  }
+  return { ...article, html, portableMarkdown }
+}
+
+function replaceTencentDetail(windowObject, editor, article) {
+  selectTencentEditor(windowObject, editor)
+
+  let pasted = false
+  if (windowObject.DataTransfer && windowObject.ClipboardEvent) {
+    const transfer = new windowObject.DataTransfer()
+    transfer.setData('text/html', article.html)
+    transfer.setData('text/plain', article.portableMarkdown)
+    const event = new windowObject.ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: transfer,
+    })
+    const before = editor.innerHTML
+    editor.dispatchEvent(event)
+    pasted = event.defaultPrevented || editor.innerHTML !== before
+  }
+  if (!pasted) {
+    if (typeof windowObject.document.execCommand !== 'function') {
+      throw new Error('腾讯云市场：浏览器缺少富文本粘贴接口')
+    }
+    const accepted = windowObject.document.execCommand('insertHTML', false, article.html)
+    if (!accepted) throw new Error('腾讯云市场：商品详情编辑器拒绝 HTML')
+  }
+  dispatchTencentInput(windowObject, editor, 'insertFromPaste')
+  editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
+}
+
+function guardTencentRollback(windowObject, editor, previousHtml, durationMs) {
+  let restoring = false
+  const restore = () => {
+    if (restoring || editor.innerHTML === previousHtml) return
+    restoring = true
+    editor.innerHTML = previousHtml
+    dispatchTencentInput(windowObject, editor, 'historyUndo')
+    restoring = false
+  }
+  restore()
+  const observer = new windowObject.MutationObserver(restore)
+  observer.observe(editor, { childList: true, subtree: true, attributes: true })
+  windowObject.setTimeout(() => observer.disconnect(), durationMs)
+}
+
+async function injectTencentMarket(document, article, options) {
+  const windowObject = document.defaultView
+  const editor = findTencentDetailEditor(document)
+  const previousHtml = editor.innerHTML
+  confirmPotentialOverwrite(windowObject, hasMeaningfulEditorContent(editor))
+  const uploadTimeoutMs = options.imageUploadTimeoutMs ?? 30_000
+  const expectedImages = imageState(document, article.html).count
+  try {
+    const preparedArticle = await prepareTencentArticle(
+      windowObject,
+      editor,
+      article,
+      uploadTimeoutMs,
+    )
+    replaceTencentDetail(windowObject, editor, preparedArticle)
+    await waitForCloudImages(
+      windowObject,
+      () => editor.innerHTML,
+      expectedImages,
+      '腾讯云市场',
+      uploadTimeoutMs,
+    )
+  } catch (error) {
+    guardTencentRollback(
+      windowObject,
+      editor,
+      previousHtml,
+      options.rollbackGuardMs
+        ?? Math.min(Math.max(uploadTimeoutMs, 10_000), 30_000),
+    )
+    throw error
+  }
+  return {
+    platformId: 'tencent-market',
+    titleFilled: false,
+    bodyFilled: true,
+    mode: 'html-paste',
+  }
+}
+
 const MARKDOWN_CONFIGS = {
-  cnblogs: {
-    id: 'cnblogs',
-    name: '博客园',
-    titleSelectors: ['#post-title', 'input[placeholder*="标题"]'],
-    bodySelectors: ['#md-editor', 'textarea.not-resizable'],
-  },
-  csdn: {
-    id: 'csdn',
-    name: 'CSDN',
-    titleSelectors: ['.article-bar__title input', 'input[placeholder*="标题"]'],
-    bodySelectors: ['.editor__inner[contenteditable="true"]', '[contenteditable="true"].markdown-highlighting'],
-  },
   oschina: {
     id: 'oschina',
     name: '开源中国',
@@ -535,6 +1000,12 @@ export async function injectPlatformArticle(document, article, options = {}) {
   if (platform.id === 'sohu') {
     const result = await injectSohuArticle(document, article)
     return { platformId: 'sohu', ...result, mode: 'html-api' }
+  }
+  if (platform.id === 'aliyun-market') {
+    return injectAliyunMarket(document, article, options)
+  }
+  if (platform.id === 'tencent-market') {
+    return injectTencentMarket(document, article, options)
   }
   throw new Error(`${platform.name}：尚未实现导入适配器`)
 }

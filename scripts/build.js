@@ -14,14 +14,14 @@ const metadata = `// ==UserScript==
 // @author       RinChan
 // @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
 // @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js
-// @match        https://i.cnblogs.com/posts/edit*
-// @match        https://editor.csdn.net/md/*
 // @match        https://zhuanlan.zhihu.com/write*
 // @match        https://mp.weixin.qq.com/cgi-bin/appmsg*
 // @match        https://my.oschina.net/*/blog/ai-write*
 // @match        https://baijiahao.baidu.com/*
 // @match        https://mp.toutiao.com/*
 // @match        https://mp.sohu.com/*
+// @match        https://msp.aliyun.com/msp/commodity/list/*
+// @match        https://console.cloud.tencent.com/serviceprovider/products/createNew*
 // @grant        none
 // @run-at       document-idle
 // @noframes
