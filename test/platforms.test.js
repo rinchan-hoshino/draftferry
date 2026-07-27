@@ -453,6 +453,26 @@ test('今日头条通过 ProseMirror insertHTML 导入并保留结构', async ()
   assert.equal(clicks, 0)
 })
 
+test('今日头条为内嵌 PNG 标记粘贴上传，避免预览丢图', async () => {
+  const page = dom(`
+    <textarea placeholder="请输入标题"></textarea>
+    <div class="ProseMirror" contenteditable="true"></div>
+  `, 'https://mp.toutiao.com/profile_v4/graphic/publish')
+  const { window } = page
+  const editor = window.document.querySelector('.ProseMirror')
+  window.document.execCommand = (command, _showUi, value) => {
+    if (command === 'insertHTML') editor.innerHTML = value
+    return true
+  }
+
+  await injectPlatformArticle(window.document, article)
+
+  const image = editor.querySelector('img')
+  assert.equal(image?.getAttribute('src'), 'data:image/png;base64,eA==')
+  assert.equal(image?.getAttribute('needCheck'), 'true')
+  assert.equal(image?.getAttribute('paste'), 'true')
+})
+
 test('百家号接受 UEditor 过滤后的正文且不回滚', async () => {
   const page = dom(`
     <div class="client_components_titleInput"><div contenteditable="true"></div></div>

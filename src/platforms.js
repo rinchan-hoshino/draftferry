@@ -265,6 +265,15 @@ function selectEditorEnd(windowObject, editor) {
   selection.addRange(range)
 }
 
+function prepareToutiaoPastedHtml(document, html) {
+  const container = parseHtml(document, html)
+  for (const image of container.querySelectorAll('img')) {
+    image.setAttribute('needCheck', 'true')
+    image.setAttribute('paste', 'true')
+  }
+  return container.innerHTML
+}
+
 async function injectToutiao(document, article) {
   const windowObject = document.defaultView
   const titleControl = document.querySelector('textarea[placeholder*="标题"]')
@@ -279,7 +288,8 @@ async function injectToutiao(document, article) {
   }
   editor.focus()
   selectEditorEnd(windowObject, editor)
-  const accepted = Boolean(document.execCommand('insertHTML', false, article.html))
+  const pastedHtml = prepareToutiaoPastedHtml(document, article.html)
+  const accepted = Boolean(document.execCommand('insertHTML', false, pastedHtml))
   if (!accepted) throw new Error('今日头条：编辑器拒绝 insertHTML')
   editor.dispatchEvent(new windowObject.InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }))
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
