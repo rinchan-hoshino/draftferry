@@ -1,3 +1,4 @@
+/* global unsafeWindow */
 import { renderMarkdownArticle } from './core.js'
 import { renderMermaidPng } from './mermaid-png.js'
 import {
@@ -7,6 +8,17 @@ import {
 } from './platforms.js'
 
 const PANEL_ID = 'rin-draftferry-panel'
+
+function getPageWindow() {
+  try {
+    if (typeof unsafeWindow !== 'undefined' && unsafeWindow?.document) {
+      return unsafeWindow
+    }
+  } catch {
+    // Fall back to the userscript window when the manager exposes no page bridge.
+  }
+  return window
+}
 
 function currentPlatform() {
   const fixturePlatformId = document.querySelector(
@@ -136,6 +148,7 @@ function createPanel() {
       })
       const result = await injectPlatformArticle(document, article, {
         fixturePlatformId: platform.id,
+        pageWindow: getPageWindow(),
       })
       setStatus(
         `${platform.name}已填入（${result.mode}）${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,

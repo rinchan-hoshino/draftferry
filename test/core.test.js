@@ -85,8 +85,11 @@ test('可以用所选本地图片替换 Markdown 相对路径', async () => {
   assert.match(article.html, /data:image\/png;base64,aW1hZ2U=/)
 })
 
-function installFakeQuill(window, transform = (html) => html) {
-  const editor = window.document.querySelector('.ql-editor')
+function installFakeQuill(
+  window,
+  transform = (html) => html,
+  editor = window.document.querySelector('.ql-editor'),
+) {
   let contents = { ops: [{ insert: '\n' }] }
   let restoreCalls = 0
   const restoreSources = []
@@ -148,6 +151,28 @@ test('通过搜狐 Quill API 原子填入内容，但不触发保存或发布', 
   assert.equal(editor.textContent, '小标题已填入正文')
   assert.equal(saves, 0)
   assert.equal(publishes, 0)
+})
+
+test('搜狐忽略隐藏的 Quill 副本并选择可见正文编辑器', async () => {
+  const dom = new JSDOM(`
+    <input placeholder="请输入标题">
+    <section hidden><div class="ql-container"><div class="ql-editor"><p><br></p></div></div></section>
+    <section id="article-editor"><div class="ql-container"><div class="ql-editor" contenteditable="true"><p><br></p></div></div></section>
+  `, { url: 'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle' })
+  const { window } = dom
+  const editors = window.document.querySelectorAll('.ql-editor')
+  const activeEditor = editors[1]
+  const { quill } = installFakeQuill(window, (html) => html, activeEditor)
+  delete window.Quill
+  activeEditor.closest('.ql-container').__quill = quill
+
+  await injectSohuArticle(window.document, {
+    title: '可见编辑器',
+    html: '<p>只写真实正文</p>',
+  })
+
+  assert.equal(editors[0].textContent, '')
+  assert.equal(activeEditor.textContent, '只写真实正文')
 })
 
 test('搜狐新版微前端可从编辑器容器的 __quill 取得实例', async () => {

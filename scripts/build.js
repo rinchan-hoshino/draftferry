@@ -22,7 +22,7 @@ const metadata = `// ==UserScript==
 // @match        https://mp.sohu.com/*
 // @match        https://msp.aliyun.com/msp/commodity/list*
 // @match        https://console.cloud.tencent.com/serviceprovider/products/createNew*
-// @grant        none
+// @grant        unsafeWindow
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==`

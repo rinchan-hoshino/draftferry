@@ -153,8 +153,12 @@ function confirmTextEditorOverwrite(windowObject, titleControl, bodyEditor) {
   )
 }
 
-async function injectMarkdownTextEditor(document, article, config) {
-  const windowObject = document.defaultView
+async function injectMarkdownTextEditor(
+  document,
+  article,
+  config,
+  windowObject = document.defaultView,
+) {
   if (config.preflight) {
     config.preflight(document)
   }
@@ -243,8 +247,7 @@ function invokeWechatEditor(windowObject, html) {
   })
 }
 
-async function injectWechat(document, article) {
-  const windowObject = document.defaultView
+async function injectWechat(document, article, windowObject = document.defaultView) {
   const titleControl = document.querySelector('#title')
   const bodyEditor = pickWechatBodyEditor(document)
   if (!titleControl || !bodyEditor) {
@@ -281,8 +284,7 @@ function findBaijiahaoTitle(document) {
   ])
 }
 
-async function injectBaijiahao(document, article) {
-  const windowObject = document.defaultView
+async function injectBaijiahao(document, article, windowObject = document.defaultView) {
   const titleControl = findBaijiahaoTitle(document)
   const editor = windowObject.UE_V2?.instants?.ueditorInstant0
   if (!titleControl) throw new Error('百家号：未找到标题编辑器')
@@ -321,8 +323,7 @@ function prepareToutiaoPastedHtml(document, html) {
   return container.innerHTML
 }
 
-async function injectToutiao(document, article) {
-  const windowObject = document.defaultView
+async function injectToutiao(document, article, windowObject = document.defaultView) {
   const titleControl = document.querySelector('textarea[placeholder*="标题"]')
   const editor = document.querySelector('.ProseMirror[contenteditable="true"], .ProseMirror')
   if (!titleControl || !editor) throw new Error('今日头条：未找到标题或正文编辑器')
@@ -430,8 +431,11 @@ async function uploadZhihuDataImage(windowObject, source, index) {
   return uploadedUrl.href
 }
 
-async function prepareZhihuMarkdown(document, article) {
-  const windowObject = document.defaultView
+async function prepareZhihuMarkdown(
+  document,
+  article,
+  windowObject = document.defaultView,
+) {
   const container = parseHtml(document, article.html)
   const sources = [...container.querySelectorAll('img')]
     .map((image) => image.getAttribute('src')?.trim() ?? '')
@@ -454,7 +458,7 @@ async function prepareZhihuMarkdown(document, article) {
 }
 
 async function injectZhihu(document, article, options) {
-  const windowObject = document.defaultView
+  const windowObject = options.pageWindow ?? document.defaultView
   const titleControl = queryFirst(document, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]'])
   const editor = queryFirst(document, ['.public-DraftEditor-content[contenteditable="true"]', '.DraftEditor-root [contenteditable="true"]'])
   if (!titleControl || !editor) throw new Error('知乎：未找到标题或正文编辑器')
@@ -468,7 +472,7 @@ async function injectZhihu(document, article, options) {
   const previousTitle = readControlValue(titleControl)
   let pasteDispatched = false
   try {
-    const markdown = await prepareZhihuMarkdown(document, article)
+    const markdown = await prepareZhihuMarkdown(document, article, windowObject)
     const transfer = new windowObject.DataTransfer()
     transfer.setData('text/plain', markdown)
     const buttonsBeforePaste = new Set(
@@ -525,10 +529,12 @@ async function injectZhihu(document, article, options) {
 }
 
 function normalizedLabelText(element) {
-  return element.textContent?.replace(/\s+/g, '').replace(/[：:]$/, '') ?? ''
+  return element.textContent
+    ?.replace(/\s+/g, '')
+    .replace(/^[*＊]+|[：:*＊]+$/g, '') ?? ''
 }
 
-function findAliyunDetailEditor(document) {
+function findAliyunDetailEditor(document, windowObject = document.defaultView) {
   const label = [...document.querySelectorAll('label')].find((element) => (
     ['产品详情', '商品详情'].includes(normalizedLabelText(element))
   ))
@@ -539,7 +545,7 @@ function findAliyunDetailEditor(document) {
     : null
   const instanceName = instanceClass?.replace(/^cke_editor_/, '')
   const editor = instanceName
-    ? document.defaultView.CKEDITOR?.instances?.[instanceName]
+    ? windowObject.CKEDITOR?.instances?.[instanceName]
     : null
   if (!label || !formItem || !wrapper || !editor) {
     throw new Error('阿里云市场：未找到“产品详情”CKEditor 实例')
@@ -656,8 +662,8 @@ function observeAliyunUploadResponses(windowObject, editor, expectedCount, timeo
 }
 
 async function injectAliyunMarket(document, article, options) {
-  const windowObject = document.defaultView
-  const editor = findAliyunDetailEditor(document)
+  const windowObject = options.pageWindow ?? document.defaultView
+  const editor = findAliyunDetailEditor(document, windowObject)
   const previousHtml = editor.getData() ?? ''
   confirmPotentialOverwrite(
     windowObject,
@@ -945,7 +951,7 @@ function guardTencentRollback(windowObject, editor, previousHtml, durationMs) {
 }
 
 async function injectTencentMarket(document, article, options) {
-  const windowObject = document.defaultView
+  const windowObject = options.pageWindow ?? document.defaultView
   const editor = findTencentDetailEditor(document)
   const previousHtml = editor.innerHTML
   confirmPotentialOverwrite(windowObject, hasMeaningfulEditorContent(editor))
@@ -1000,11 +1006,13 @@ const MARKDOWN_CONFIGS = {
 }
 
 export async function injectPlatformArticle(document, article, options = {}) {
+  const runtimeDocument = options.pageWindow?.document ?? document
+  const runtimeWindow = options.pageWindow ?? runtimeDocument.defaultView
   const fixturePlatform = (
-    document.defaultView.location.protocol === 'file:'
+    runtimeWindow.location.protocol === 'file:'
     && options.fixturePlatformId
   ) ? getPlatformById(options.fixturePlatformId) : null
-  const platform = fixturePlatform ?? detectPlatform(document.defaultView.location)
+  const platform = fixturePlatform ?? detectPlatform(runtimeWindow.location)
   if (!platform) {
     throw new Error('当前页面不是已支持的文章平台')
   }
@@ -1013,29 +1021,34 @@ export async function injectPlatformArticle(document, article, options = {}) {
   }
 
   if (MARKDOWN_CONFIGS[platform.id]) {
-    return injectMarkdownTextEditor(document, article, MARKDOWN_CONFIGS[platform.id])
+    return injectMarkdownTextEditor(
+      runtimeDocument,
+      article,
+      MARKDOWN_CONFIGS[platform.id],
+      runtimeWindow,
+    )
   }
   if (platform.id === 'wechat') {
-    return injectWechat(document, article)
+    return injectWechat(runtimeDocument, article, runtimeWindow)
   }
   if (platform.id === 'baijiahao') {
-    return injectBaijiahao(document, article)
+    return injectBaijiahao(runtimeDocument, article, runtimeWindow)
   }
   if (platform.id === 'zhihu') {
-    return injectZhihu(document, article, options)
+    return injectZhihu(runtimeDocument, article, options)
   }
   if (platform.id === 'toutiao') {
-    return injectToutiao(document, article)
+    return injectToutiao(runtimeDocument, article, runtimeWindow)
   }
   if (platform.id === 'sohu') {
-    const result = await injectSohuArticle(document, article)
+    const result = await injectSohuArticle(runtimeDocument, article, options)
     return { platformId: 'sohu', ...result, mode: 'html-api' }
   }
   if (platform.id === 'aliyun-market') {
-    return injectAliyunMarket(document, article, options)
+    return injectAliyunMarket(runtimeDocument, article, options)
   }
   if (platform.id === 'tencent-market') {
-    return injectTencentMarket(document, article, options)
+    return injectTencentMarket(runtimeDocument, article, options)
   }
   throw new Error(`${platform.name}：尚未实现导入适配器`)
 }

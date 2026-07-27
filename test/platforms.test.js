@@ -140,7 +140,7 @@ test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传�
   const page = dom(`
     <input id="product-name" value="保留商品名称">
     <div class="acpn-form-item">
-      <label class="acpn-form-label">产品详情：</label>
+      <label class="acpn-form-label"><span aria-hidden="true">*</span> 产品详情：</label>
       <div class="acpn-form-content">
         <div class="cke_140 cke cke_editor_editor3"></div>
       </div>
@@ -188,13 +188,38 @@ test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传�
   assert.equal(clicks, 0)
 })
 
+test('阿里云市场通过页面主上下文取得 CKEditor 实例', async () => {
+  const sandbox = dom('<main>油猴隔离上下文</main>', 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  const page = dom(`
+    <div class="acpn-form-item">
+      <label><span>*</span> 产品详情：</label>
+      <div class="cke cke_editor_editor3"></div>
+    </div>
+  `, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  let currentHtml = ''
+  page.window.CKEDITOR = { instances: { editor3: {
+    getData: () => currentHtml,
+    setData(html, options) { currentHtml = html; options?.callback?.() },
+    fire(_name, data) { currentHtml = data.dataValue },
+    focus() {},
+  } } }
+
+  const result = await injectPlatformArticle(sandbox.window.document, {
+    ...article,
+    html: '<p>主上下文正文</p>',
+  }, { pageWindow: page.window })
+
+  assert.equal(result.platformId, 'aliyun-market')
+  assert.equal(currentHtml, '<p>主上下文正文</p>')
+})
+
 test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async () => {
   const page = dom(`
     <input id="product-name" value="保留商品名称">
     <div class="other-detail"><span>客户案例</span>
       <div class="w-e-text" contenteditable="true"></div>
     </div>
-    <div class="market-detail"><span>商品详情</span>
+    <div class="market-detail"><span>商品详情 <i aria-hidden="true">*</i></span>
       <div class="w-e-text" contenteditable="true"></div>
     </div>
     <button id="save">保存</button><button id="publish">发布</button>

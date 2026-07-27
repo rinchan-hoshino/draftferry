@@ -217,9 +217,31 @@ export function hasMeaningfulEditorContent(editor) {
   return false
 }
 
+function isUsableSohuEditor(editor) {
+  if (!editor || editor.closest('[hidden], [aria-hidden="true"]')) return false
+  let node = editor
+  while (node && node.nodeType === 1) {
+    const style = editor.ownerDocument.defaultView.getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+    node = node.parentElement
+  }
+  return editor.getAttribute('contenteditable') !== 'false'
+}
+
+function findSohuEditor(document) {
+  const editors = [...document.querySelectorAll(EDITOR_SELECTOR)].filter(isUsableSohuEditor)
+  const editable = editors.filter((editor) => editor.getAttribute('contenteditable') === 'true')
+  const candidates = editable.length > 0 ? editable : editors
+  return candidates.sort((left, right) => {
+    const leftRect = left.getBoundingClientRect()
+    const rightRect = right.getBoundingClientRect()
+    return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height)
+  })[0] ?? null
+}
+
 export function hasExistingSohuDraft(document) {
   const title = document.querySelector(TITLE_SELECTOR)?.value?.trim()
-  const editor = document.querySelector(EDITOR_SELECTOR)
+  const editor = findSohuEditor(document)
   return Boolean(title || hasMeaningfulEditorContent(editor))
 }
 
@@ -297,10 +319,11 @@ function setInputValue(windowObject, input, value, notify = true) {
   }
 }
 
-export async function injectSohuArticle(document, article) {
-  const windowObject = document.defaultView
-  const titleInput = document.querySelector(TITLE_SELECTOR)
-  const editor = document.querySelector(EDITOR_SELECTOR)
+export async function injectSohuArticle(document, article, options = {}) {
+  const windowObject = options.pageWindow ?? document.defaultView
+  const runtimeDocument = windowObject.document ?? document
+  const titleInput = runtimeDocument.querySelector(TITLE_SELECTOR)
+  const editor = findSohuEditor(runtimeDocument)
 
   if (!titleInput) {
     throw new Error('未找到搜狐标题输入框；页面结构可能已经变化')
@@ -311,7 +334,7 @@ export async function injectSohuArticle(document, article) {
   if (typeof article?.html !== 'string' || !article.html.trim()) {
     throw new Error('没有可填入的正文内容')
   }
-  confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(document))
+  confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(runtimeDocument))
 
   const quill = getSohuQuill(windowObject, editor)
   const previousDelta = cloneDelta(windowObject, quill.getContents())

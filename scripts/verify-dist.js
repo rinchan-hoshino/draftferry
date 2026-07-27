@@ -38,7 +38,7 @@ for (const match of expectedMatches) {
   assert.ok(artifact.includes(`// @match        ${match}`), `缺少 @match ${match}`)
 }
 assert.equal((artifact.match(/^\/\/ @match\s+/gm) ?? []).length, expectedMatches.length)
-assert.match(artifact, /\/\/ @grant\s+none/)
+assert.match(artifact, /\/\/ @grant\s+unsafeWindow/)
 assert.doesNotMatch(artifact, /\/\/ @require\s+/)
 assert.doesNotMatch(artifact, /\/\/ @connect\s+|<all_urls>/)
 assert.ok(artifactStat.size < 5 * 1024 * 1024, '构建产物超过 5 MiB')
