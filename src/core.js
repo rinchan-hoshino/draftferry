@@ -234,7 +234,7 @@ export function confirmPotentialOverwrite(windowObject, hasExistingContent) {
 
 function getSohuQuill(windowObject, editor) {
   const container = editor.closest('.ql-container')
-  const quill = container && windowObject.Quill?.find?.(container)
+  const quill = container?.__quill ?? windowObject.Quill?.find?.(container)
   if (
     !quill
     || typeof quill.getContents !== 'function'

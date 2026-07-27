@@ -11,11 +11,11 @@
 - 油猴安装文件：`draftferry.user.js`
 - 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前版本为 `0.3.6`；Tampermonkey 的更新与下载地址都固定到上述链接。
+产品名和链接不再随平台数量变化。当前版本为 `0.3.7`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
-| 平台 | 0.3.6 Preview 导入方式 |
+| 平台 | 0.3.7 Preview 导入方式 |
 | --- | --- |
 | 博客园 | 向 Markdown textarea 填入可移植 Markdown |
 | CSDN | 向 Markdown contenteditable 填入可移植 Markdown |

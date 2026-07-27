@@ -150,6 +150,25 @@ test('通过搜狐 Quill API 原子填入内容，但不触发保存或发布', 
   assert.equal(publishes, 0)
 })
 
+test('搜狐新版微前端可从编辑器容器的 __quill 取得实例', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  const container = editor.closest('.ql-container')
+  const { quill } = installFakeQuill(window)
+  delete window.Quill
+  container.__quill = quill
+
+  await injectSohuArticle(window.document, {
+    title: '新版编辑器',
+    html: '<p>正文</p><img alt="流程图" src="data:image/png;base64,eA==">',
+  })
+
+  assert.equal(window.document.querySelector('input').value, '新版编辑器')
+  assert.equal(editor.querySelector('img')?.getAttribute('src'), 'data:image/png;base64,eA==')
+  assert.equal(editor.textContent.includes('data:image'), false)
+})
+
 test('找不到真实 Quill 实例时在改动前失败', async () => {
   const dom = createSohuDom()
   await assert.rejects(
