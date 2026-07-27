@@ -301,8 +301,21 @@ function selectSohuEditorContents(windowObject, editor) {
   selection.addRange(range)
 }
 
+function imageCountInHtml(document, html) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  return container.querySelectorAll('img').length
+}
+
+function assertSohuImagesPreserved(editor, expectedImageCount) {
+  if (editor.querySelectorAll('img').length < expectedImageCount) {
+    throw new Error('搜狐：导入后图片数量不完整；已停止，且不会保存或发布')
+  }
+}
+
 async function pasteSohuHtml(windowObject, editor, html) {
   if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
+  const expectedImageCount = imageCountInHtml(editor.ownerDocument, html)
   const transfer = new windowObject.DataTransfer()
   const plainText = editor.ownerDocument.createElement('div')
   plainText.innerHTML = html
@@ -317,7 +330,13 @@ async function pasteSohuHtml(windowObject, editor, html) {
   })
   editor.dispatchEvent(event)
   await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
-  if (editor.innerHTML !== before) return true
+  if (editor.innerHTML !== before) {
+    if (editor.querySelectorAll('img').length >= expectedImageCount) return true
+    const restored = editor.ownerDocument.execCommand?.('undo', false) === true
+    if (!restored || editor.innerHTML !== before) {
+      throw new Error('搜狐：原生粘贴丢失图片且无法安全切换插入方式')
+    }
+  }
 
   selectSohuEditorContents(windowObject, editor)
   const inserted = editor.ownerDocument.execCommand?.('insertHTML', false, html) === true
@@ -329,7 +348,9 @@ async function pasteSohuHtml(windowObject, editor, html) {
   }))
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
   await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-  return editor.innerHTML !== before
+  if (editor.innerHTML === before) return false
+  assertSohuImagesPreserved(editor, expectedImageCount)
+  return true
 }
 
 function cloneDelta(windowObject, delta) {
@@ -407,6 +428,7 @@ export async function injectSohuArticle(document, article, options = {}) {
   try {
     editor.focus()
     quill.clipboard.dangerouslyPasteHTML(article.html, 'user')
+    assertSohuImagesPreserved(editor, imageCountInHtml(runtimeDocument, article.html))
     if (article.title) {
       setInputValue(windowObject, titleInput, article.title)
     }

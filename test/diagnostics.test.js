@@ -89,31 +89,57 @@ test('搜狐诊断报告隐藏副本、页面桥和容器实例，但不读取�
   assert.equal(parseDiagnostics(sandbox, 'sohu', page.window).pageBridge, true)
 })
 
-test('腾讯云诊断记录带星号标签、编辑器几何和有限祖先结构', () => {
-  const dom = new JSDOM(`
-    <section class="market-product-detail">
+test('腾讯云诊断扫描页面主上下文、开放 ShadowRoot 和同源 iframe 中的通用编辑候选', () => {
+  const sandbox = new JSDOM('<main>PRIVATE SANDBOX</main>', { url: 'https://example.invalid/' })
+  const page = new JSDOM(`
+    <section class="market-product-detail PRIVATE-TOP-CLASS">
       <span class="form-label">商品详情 *</span>
-      <div class="editor-shell"><div id="text-ele-123" class="w-e-text" contenteditable="true">PRIVATE</div></div>
+      <div class="editor-shell"><div id="text-ele-123" class="w-e-text" contenteditable="true">PRIVATE TOP</div></div>
     </section>
+    <div id="shadow-host"></div>
+    <iframe></iframe>
+    <iframe id="blocked"></iframe>
   `, { url: 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET' })
-  const editor = dom.window.document.querySelector('.w-e-text')
-  editor.getBoundingClientRect = () => ({ x: 100, y: 30, width: 800, height: 300 })
+  const { document } = page.window
+  const topEditor = document.querySelector('.w-e-text')
+  topEditor.getBoundingClientRect = () => ({ x: 100, y: 30, width: 800, height: 300 })
+
+  const shadow = document.querySelector('#shadow-host').attachShadow({ mode: 'open' })
+  shadow.innerHTML = '<div class="PRIVATE-SHADOW-EDITOR" role="textbox" contenteditable="true">PRIVATE SHADOW</div>'
+
+  const frame = document.querySelector('iframe')
+  frame.contentDocument.body.innerHTML = '<textarea class="PRIVATE-FRAME-EDITOR">PRIVATE FRAME</textarea>'
+  const blockedFrame = document.querySelector('#blocked')
+  Object.defineProperty(blockedFrame, 'contentDocument', {
+    configurable: true,
+    get() { throw new Error('cross-origin PRIVATE URL') },
+  })
 
   const text = collectPlatformDiagnostics({
-    document: dom.window.document,
-    pageWindow: dom.window,
+    document: sandbox.window.document,
+    pageWindow: page.window,
     platformId: 'tencent-market',
     version: 'test-version',
   })
   const result = JSON.parse(text)
 
-  assert.equal(result.tencent.labels.some((label) => (
+  assert.equal(result.schema, 2)
+  assert.equal(result.tencent.rootCounts.document, 1)
+  assert.equal(result.tencent.rootCounts.shadowRoot, 1)
+  assert.equal(result.tencent.rootCounts.iframeDocument, 1)
+  assert.equal(result.tencent.inaccessibleIframeCount, 1)
+  assert.equal(result.tencent.roots.length, 3)
+  assert.equal(result.tencent.roots[0].labels.some((label) => (
     label.labelKind === '商品详情' && label.hasRequiredMarker
   )), true)
-  assert.equal(result.tencent.editors[0].rect.width, 800)
+  assert.equal(result.tencent.roots[0].wangEditors[0].rect.width, 800)
   assert.equal(
-    result.tencent.editors[0].ancestors[0].classSignals.includes('contains-editor'),
+    result.tencent.roots[0].wangEditors[0].ancestors[0].classSignals.includes('contains-editor'),
     true,
   )
+  assert.equal(result.tencent.roots[1].editableCandidates[0].tag, 'div')
+  assert.equal(result.tencent.roots[2].editableCandidates[0].tag, 'textarea')
   assert.equal(text.includes('PRIVATE'), false)
+  assert.equal(text.includes('example.invalid'), false)
+  assert.equal(text.includes('serviceprovider'), false)
 })

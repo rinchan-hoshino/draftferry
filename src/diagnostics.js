@@ -1,3 +1,5 @@
+import { inspectOpenEditorRoots } from './dom-roots.js'
+
 function roundedRect(element) {
   const rect = element.getBoundingClientRect()
   return {
@@ -185,14 +187,46 @@ function collectAliyun(document, pageWindow) {
 }
 
 function collectTencent(document, pageWindow) {
-  return {
-    labels: collectLabels(document, pageWindow),
-    editors: [...document.querySelectorAll('.w-e-text[contenteditable="true"]')]
-      .slice(0, 20)
-      .map((editor) => ({
-        ...elementSummary(editor, pageWindow),
-        ancestors: ancestorPath(editor, document.body),
+  let runtimeDocument = document
+  try {
+    runtimeDocument = pageWindow.document ?? document
+  } catch {
+    // The safe sandbox document remains useful if the page bridge is unavailable.
+  }
+  const inspection = inspectOpenEditorRoots(runtimeDocument)
+  const rootCounts = {
+    document: 0,
+    shadowRoot: 0,
+    iframeDocument: 0,
+  }
+  const roots = inspection.entries.map(({ root, kind }, rootIndex) => {
+    rootCounts[kind] += 1
+    const rootDocument = root.ownerDocument ?? root
+    const rootWindow = rootDocument.defaultView ?? pageWindow
+    const wangEditors = [...root.querySelectorAll('.w-e-text')]
+    const editableCandidates = [...new Set(root.querySelectorAll(
+      '[contenteditable]:not([contenteditable="false"]), textarea, [role="textbox"]',
+    ))].filter((element) => !element.matches('.w-e-text'))
+    return {
+      rootIndex,
+      kind,
+      labels: collectLabels(root, rootWindow),
+      wangEditors: wangEditors.slice(0, 20).map((element) => ({
+        ...elementSummary(element, rootWindow),
+        ancestors: ancestorPath(element, rootDocument.body),
       })),
+      editableCandidates: editableCandidates.slice(0, 20).map((element) => ({
+        ...elementSummary(element, rootWindow),
+        ancestors: ancestorPath(element, rootDocument.body),
+      })),
+      editableCandidateCount: editableCandidates.length,
+    }
+  })
+  return {
+    rootCounts,
+    inaccessibleIframeCount: inspection.inaccessibleIframeCount,
+    truncated: inspection.truncated,
+    roots,
   }
 }
 
@@ -203,7 +237,7 @@ export function collectPlatformDiagnostics({
   version,
 }) {
   const diagnostics = {
-    schema: 1,
+    schema: 2,
     draftferryVersion: version,
     platformId,
     pageBridge: pageWindow !== document.defaultView,

@@ -253,6 +253,49 @@ test('搜狐没有可见 Quill 实例时通过编辑器原生粘贴事件导入'
   assert.equal(editor.textContent, '搜狐原生粘贴正文')
 })
 
+test('搜狐原生粘贴吞掉表格图片时撤销并改用保留图片的 insertHTML', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    const pasted = window.document.createElement('div')
+    pasted.innerHTML = event.clipboardData.getData('text/html')
+    pasted.querySelectorAll('img').forEach((image) => image.remove())
+    editor.innerHTML = pasted.innerHTML
+  })
+  const commands = []
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command, _showUi, html) => {
+    commands.push(command)
+    if (command === 'undo') editor.innerHTML = previousHtml
+    if (command === 'insertHTML') editor.innerHTML = html
+    return true
+  }
+
+  await injectSohuArticle(window.document, {
+    title: '表格图片',
+    html: '<table><tbody><tr><td>左</td><td><img src="https://media.example/image.png"></td><td>右</td></tr></tbody></table>',
+  })
+
+  assert.deepEqual(commands, ['undo', 'insertHTML'])
+  assert.equal(editor.querySelectorAll('img').length, 1)
+  assert.equal(editor.querySelector('img').src, 'https://media.example/image.png')
+})
+
 test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 insertHTML', async () => {
   const dom = createSohuDom()
   const { window } = dom
@@ -335,6 +378,25 @@ test('找不到真实 Quill 实例且原生粘贴未被接管时在改动前失�
   assert.equal(dom.window.document.querySelector('input').value, '')
 })
 
+test('搜狐 Quill 吞掉图片时拒绝成功并恢复原内容', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  const fake = installFakeQuill(window, () => '<p>平台只保留文字</p>')
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '不得静默成功',
+      html: '<p>文字</p><img alt="图" src="https://media.example/image.png">',
+    }),
+    /搜狐：导入后图片数量不完整/,
+  )
+
+  assert.equal(window.document.querySelector('input').value, '')
+  assert.equal(editor.innerHTML, '<p><br></p>')
+  assert.equal(fake.getRestoreCalls(), 1)
+})
+
 test('搜狐接受平台对写入结果的改写且不回滚', async () => {
   const dom = createSohuDom()
   const { window } = dom
@@ -348,7 +410,7 @@ test('搜狐接受平台对写入结果的改写且不回滚', async () => {
 
   const result = await injectSohuArticle(window.document, {
     title: '原始标题',
-    html: '<p>原始正文</p><img alt="图" src="data:image/png;base64,eA==">',
+    html: '<p>原始正文</p>',
   })
 
   assert.equal(result.titleFilled, true)

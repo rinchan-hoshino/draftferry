@@ -3,6 +3,7 @@ import {
   hasMeaningfulEditorContent,
   injectSohuArticle,
 } from './core.js'
+import { collectOpenEditorRoots } from './dom-roots.js'
 
 const PLATFORMS = [
   { id: 'zhihu', name: '知乎', hosts: ['zhihu.com'] },
@@ -757,32 +758,6 @@ function isVisuallyAssociatedTencentField(label, editor) {
   const columnGap = editorRect.top - labelRect.bottom
   const stacked = horizontalOverlap > 0 && columnGap >= 0 && columnGap <= 120
   return sameRow || stacked
-}
-
-function collectOpenEditorRoots(document) {
-  const roots = [document]
-  const seen = new Set(roots)
-  for (let index = 0; index < roots.length && roots.length < 100; index += 1) {
-    const root = roots[index]
-    for (const element of root.querySelectorAll('*')) {
-      if (element.shadowRoot && !seen.has(element.shadowRoot)) {
-        seen.add(element.shadowRoot)
-        roots.push(element.shadowRoot)
-      }
-      if (element.tagName === 'IFRAME') {
-        try {
-          const frameDocument = element.contentDocument
-          if (frameDocument && !seen.has(frameDocument)) {
-            seen.add(frameDocument)
-            roots.push(frameDocument)
-          }
-        } catch {
-          // Cross-origin frames cannot expose their editor DOM to this userscript.
-        }
-      }
-    }
-  }
-  return roots
 }
 
 function findTencentDetailEditor(document) {
