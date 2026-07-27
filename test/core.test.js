@@ -296,6 +296,48 @@ test('搜狐原生粘贴吞掉表格图片时撤销并改用保留图片的 inse
   assert.equal(editor.querySelector('img').src, 'https://media.example/image.png')
 })
 
+test('搜狐不能用旧草稿图片冒充本次导入图片', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  editor.innerHTML = '<p>旧正文</p><img src="https://media.example/old.png">'
+  window.confirm = () => true
+  class FakeDataTransfer {
+    #data = new Map()
+    setData(type, value) { this.#data.set(type, value) }
+    getData(type) { return this.#data.get(type) ?? '' }
+  }
+  class FakeClipboardEvent extends window.Event {
+    constructor(type, init) {
+      super(type, init)
+      this.clipboardData = init.clipboardData
+    }
+  }
+  window.DataTransfer = FakeDataTransfer
+  window.ClipboardEvent = FakeClipboardEvent
+  editor.addEventListener('paste', (event) => {
+    event.preventDefault()
+    editor.innerHTML = '<p>新正文，但新图片被吞掉</p><img src="https://media.example/old.png">'
+  })
+  const commands = []
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command, _showUi, html) => {
+    commands.push(command)
+    if (command === 'undo') editor.innerHTML = previousHtml
+    if (command === 'insertHTML') editor.innerHTML = html
+    return true
+  }
+
+  await injectSohuArticle(window.document, {
+    title: '不能冒充',
+    html: '<p>新正文</p><img src="https://media.example/new.png">',
+  })
+
+  assert.deepEqual(commands, ['undo', 'insertHTML'])
+  assert.equal(editor.querySelectorAll('img').length, 1)
+  assert.equal(editor.querySelector('img').src, 'https://media.example/new.png')
+})
+
 test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 insertHTML', async () => {
   const dom = createSohuDom()
   const { window } = dom
