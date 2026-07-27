@@ -28,6 +28,10 @@ assert.equal(
   panel.querySelector('[data-rin-action="import"]')?.textContent,
   '导入 Markdown',
 )
+assert.equal(
+  panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
+  '复制诊断',
+)
 assert.match(
   panel.querySelector('[data-rin-status]')?.textContent ?? '',
   /搜狐号 · 稿渡 Preview/,

@@ -1,5 +1,6 @@
-/* global unsafeWindow */
+/* global __DRAFTFERRY_VERSION__, unsafeWindow */
 import { renderMarkdownArticle } from './core.js'
+import { collectPlatformDiagnostics } from './diagnostics.js'
 import { renderMermaidPng } from './mermaid-png.js'
 import {
   detectPlatform,
@@ -61,6 +62,26 @@ function findMarkdownFile(files) {
   return files.find((file) => /\.(?:md|markdown)$/i.test(file.name))
 }
 
+async function copyDiagnosticText(pageWindow, document, text) {
+  try {
+    if (typeof pageWindow.navigator.clipboard?.writeText === 'function') {
+      await pageWindow.navigator.clipboard.writeText(text)
+      return
+    }
+  } catch {
+    // Fall through to execCommand for browsers that restrict the Clipboard API.
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.setAttribute('style', 'position:fixed;left:-9999px;top:0')
+  document.body.append(textarea)
+  textarea.select()
+  const copied = document.execCommand?.('copy') === true
+  textarea.remove()
+  if (!copied) throw new Error('浏览器未允许复制；请截图反馈')
+}
+
 function createPanel() {
   const panel = document.createElement('section')
   panel.id = PANEL_ID
@@ -68,6 +89,7 @@ function createPanel() {
   panel.setAttribute('aria-label', '稿渡 · Markdown 一键排版 Preview')
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
+    <button type="button" data-rin-action="diagnose">复制诊断</button>
     <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 稿渡 Preview` : '当前平台未支持'}</span>
     <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden style="display:none !important">
   `
@@ -79,7 +101,7 @@ function createPanel() {
     'display: flex',
     'align-items: center',
     'gap: 10px',
-    'max-width: 420px',
+    'max-width: 540px',
     'padding: 12px',
     'border: 1px solid #e0c36c',
     'border-radius: 8px',
@@ -101,6 +123,18 @@ function createPanel() {
     'white-space: nowrap',
   ].join(';'))
 
+  const diagnoseButton = panel.querySelector('[data-rin-action="diagnose"]')
+  diagnoseButton.setAttribute('style', [
+    'border: 1px solid #d8a522',
+    'border-radius: 6px',
+    'padding: 7px 10px',
+    'background: #fff',
+    'color: #8a6500',
+    'font-weight: 700',
+    'cursor: pointer',
+    'white-space: nowrap',
+  ].join(';'))
+
   const status = panel.querySelector('[data-rin-status]')
   const fileInput = panel.querySelector('[data-rin-files]')
 
@@ -108,7 +142,9 @@ function createPanel() {
     status.textContent = message
     status.style.color = state === 'error' ? '#b42318' : '#555'
     button.disabled = state === 'busy'
+    diagnoseButton.disabled = state === 'busy'
     button.style.opacity = state === 'busy' ? '.65' : '1'
+    diagnoseButton.style.opacity = state === 'busy' ? '.65' : '1'
   }
 
   button.addEventListener('click', () => {
@@ -119,6 +155,29 @@ function createPanel() {
     }
     fileInput.value = ''
     fileInput.click()
+  })
+
+  diagnoseButton.addEventListener('click', async () => {
+    const platform = currentPlatform()
+    if (!platform) {
+      setStatus('当前页面不是已支持的平台', 'error')
+      return
+    }
+    setStatus('正在采集页面结构诊断…', 'busy')
+    try {
+      const pageWindow = getPageWindow()
+      const runtimeDocument = pageWindow.document ?? document
+      const diagnostics = collectPlatformDiagnostics({
+        document: runtimeDocument,
+        pageWindow,
+        platformId: platform.id,
+        version: __DRAFTFERRY_VERSION__,
+      })
+      await copyDiagnosticText(pageWindow, runtimeDocument, diagnostics)
+      setStatus('诊断已复制；请直接粘贴到群里（不含正文和账号数据）')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error), 'error')
+    }
   })
 
   fileInput.addEventListener('change', async () => {

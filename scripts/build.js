@@ -41,6 +41,7 @@ await build({
   banner: { js: metadata },
   define: {
     'process.env.NODE_ENV': '"production"',
+    __DRAFTFERRY_VERSION__: JSON.stringify(packageJson.version),
   },
   logLevel: 'info',
 })

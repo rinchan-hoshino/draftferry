@@ -7,10 +7,12 @@ async function withUserscriptGlobals(dom, callback) {
     window: globalThis.window,
     document: globalThis.document,
     MutationObserver: globalThis.MutationObserver,
+    __DRAFTFERRY_VERSION__: globalThis.__DRAFTFERRY_VERSION__,
   }
   globalThis.window = dom.window
   globalThis.document = dom.window.document
   globalThis.MutationObserver = dom.window.MutationObserver
+  globalThis.__DRAFTFERRY_VERSION__ = 'test-version'
   try {
     await callback()
   } finally {
@@ -18,6 +20,7 @@ async function withUserscriptGlobals(dom, callback) {
     globalThis.window = previous.window
     globalThis.document = previous.document
     globalThis.MutationObserver = previous.MutationObserver
+    globalThis.__DRAFTFERRY_VERSION__ = previous.__DRAFTFERRY_VERSION__
     dom.window.close()
   }
 }
@@ -40,12 +43,26 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
   }
 
   dom.window.MutationObserver = RecordingMutationObserver
+  let copiedDiagnostic = ''
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: { async writeText(text) { copiedDiagnostic = text } },
+  })
 
   await withUserscriptGlobals(dom, async () => {
     globalThis.MutationObserver = RecordingMutationObserver
     await import(`../src/userscript.js?startup-test=${Date.now()}`)
     const panel = dom.window.document.querySelector('#rin-draftferry-panel')
     assert.ok(panel)
+    assert.equal(
+      panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
+      '复制诊断',
+    )
+    panel.querySelector('[data-rin-action="diagnose"]').click()
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0))
+    assert.match(copiedDiagnostic, /"draftferryVersion": "test-version"/)
+    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已复制/)
+
     const fileInput = panel.querySelector('[data-rin-files]')
     assert.equal(fileInput.style.getPropertyValue('display'), 'none')
     assert.equal(fileInput.style.getPropertyPriority('display'), 'important')
