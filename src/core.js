@@ -319,9 +319,10 @@ function imageSourcesInHtml(document, html) {
     .map((image) => normalizedImageSource(document, image))
 }
 
-function hasAllImageSources(editor, expectedImageSources) {
+function hasAllImageSources(editor, expectedImageSources, excludedImages = new Set()) {
   const available = new Map()
   for (const image of editor.querySelectorAll('img')) {
+    if (excludedImages.has(image)) continue
     const source = normalizedImageSource(editor.ownerDocument, image)
     available.set(source, (available.get(source) ?? 0) + 1)
   }
@@ -333,8 +334,8 @@ function hasAllImageSources(editor, expectedImageSources) {
   })
 }
 
-function assertSohuImagesPreserved(editor, expectedImageSources) {
-  if (!hasAllImageSources(editor, expectedImageSources)) {
+function assertSohuImagesPreserved(editor, expectedImageSources, excludedImages) {
+  if (!hasAllImageSources(editor, expectedImageSources, excludedImages)) {
     throw new Error('搜狐：导入后图片数量不完整；已停止，且不会保存或发布')
   }
 }
@@ -342,6 +343,7 @@ function assertSohuImagesPreserved(editor, expectedImageSources) {
 async function pasteSohuHtml(windowObject, editor, html) {
   if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
   const expectedImageSources = imageSourcesInHtml(editor.ownerDocument, html)
+  let previousImageNodes = new Set(editor.querySelectorAll('img'))
   const transfer = new windowObject.DataTransfer()
   const plainText = editor.ownerDocument.createElement('div')
   plainText.innerHTML = html
@@ -357,11 +359,12 @@ async function pasteSohuHtml(windowObject, editor, html) {
   editor.dispatchEvent(event)
   await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
   if (editor.innerHTML !== before) {
-    if (hasAllImageSources(editor, expectedImageSources)) return true
+    if (hasAllImageSources(editor, expectedImageSources, previousImageNodes)) return true
     const restored = editor.ownerDocument.execCommand?.('undo', false) === true
     if (!restored || editor.innerHTML !== before) {
       throw new Error('搜狐：原生粘贴丢失图片且无法安全切换插入方式')
     }
+    previousImageNodes = new Set(editor.querySelectorAll('img'))
   }
 
   selectSohuEditorContents(windowObject, editor)
@@ -375,7 +378,7 @@ async function pasteSohuHtml(windowObject, editor, html) {
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
   await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
   if (editor.innerHTML === before) return false
-  assertSohuImagesPreserved(editor, expectedImageSources)
+  assertSohuImagesPreserved(editor, expectedImageSources, previousImageNodes)
   return true
 }
 
@@ -451,10 +454,15 @@ export async function injectSohuArticle(document, article, options = {}) {
   }
 
   const previousDelta = cloneDelta(windowObject, quill.getContents())
+  const previousImageNodes = new Set(editor.querySelectorAll('img'))
   try {
     editor.focus()
     quill.clipboard.dangerouslyPasteHTML(article.html, 'user')
-    assertSohuImagesPreserved(editor, imageSourcesInHtml(runtimeDocument, article.html))
+    assertSohuImagesPreserved(
+      editor,
+      imageSourcesInHtml(runtimeDocument, article.html),
+      previousImageNodes,
+    )
     if (article.title) {
       setInputValue(windowObject, titleInput, article.title)
     }
