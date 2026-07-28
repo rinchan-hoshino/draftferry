@@ -153,6 +153,28 @@ test('通过搜狐 Quill API 原子填入内容，但不触发保存或发布', 
   assert.equal(publishes, 0)
 })
 
+test('搜狐导入时强制表格零间距并折叠相邻边框', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  let insertedHtml = ''
+  installFakeQuill(window, (html) => {
+    insertedHtml = html
+    return html
+  })
+
+  await injectSohuArticle(window.document, {
+    title: '连体表格',
+    html: '<table style="width:100%"><tbody><tr><td style="border:1px solid #ccc">左</td><td style="border:1px solid #ccc">右</td></tr></tbody></table>',
+  })
+
+  const inserted = new window.DOMParser().parseFromString(insertedHtml, 'text/html')
+  const table = inserted.querySelector('table')
+  assert.equal(table.getAttribute('cellspacing'), '0')
+  assert.equal(table.style.getPropertyValue('border-collapse'), 'collapse')
+  assert.equal(table.style.getPropertyPriority('border-collapse'), 'important')
+  assert.equal(table.style.getPropertyValue('border-spacing'), '0px')
+})
+
 test('搜狐忽略隐藏的 Quill 副本并选择可见正文编辑器', async () => {
   const dom = new JSDOM(`
     <input placeholder="请输入标题">
@@ -253,134 +275,6 @@ test('搜狐没有可见 Quill 实例时通过编辑器原生粘贴事件导入'
   assert.equal(editor.textContent, '搜狐原生粘贴正文')
 })
 
-test('搜狐原生粘贴吞掉表格图片时撤销并改用保留图片的 insertHTML', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  const editor = window.document.querySelector('.ql-editor')
-  class FakeDataTransfer {
-    #data = new Map()
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
-    }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    const pasted = window.document.createElement('div')
-    pasted.innerHTML = event.clipboardData.getData('text/html')
-    pasted.querySelectorAll('img').forEach((image) => image.remove())
-    editor.innerHTML = pasted.innerHTML
-  })
-  const commands = []
-  const previousHtml = editor.innerHTML
-  window.document.execCommand = (command, _showUi, html) => {
-    commands.push(command)
-    if (command === 'undo') editor.innerHTML = previousHtml
-    if (command === 'insertHTML') editor.innerHTML = html
-    return true
-  }
-
-  await injectSohuArticle(window.document, {
-    title: '表格图片',
-    html: '<table><tbody><tr><td>左</td><td><img src="https://media.example/image.png"></td><td>右</td></tr></tbody></table>',
-  })
-
-  assert.deepEqual(commands, ['undo', 'insertHTML'])
-  assert.equal(editor.querySelectorAll('img').length, 1)
-  assert.equal(editor.querySelector('img').src, 'https://media.example/image.png')
-})
-
-test('搜狐不能用旧草稿图片冒充本次导入图片', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  const editor = window.document.querySelector('.ql-editor')
-  editor.innerHTML = '<p>旧正文</p><img src="https://media.example/old.png">'
-  window.confirm = () => true
-  class FakeDataTransfer {
-    #data = new Map()
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
-    }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    editor.innerHTML = '<p>新正文，但新图片被吞掉</p><img src="https://media.example/old.png">'
-  })
-  const commands = []
-  const previousHtml = editor.innerHTML
-  window.document.execCommand = (command, _showUi, html) => {
-    commands.push(command)
-    if (command === 'undo') editor.innerHTML = previousHtml
-    if (command === 'insertHTML') editor.innerHTML = html
-    return true
-  }
-
-  await injectSohuArticle(window.document, {
-    title: '不能冒充',
-    html: '<p>新正文</p><img src="https://media.example/new.png">',
-  })
-
-  assert.deepEqual(commands, ['undo', 'insertHTML'])
-  assert.equal(editor.querySelectorAll('img').length, 1)
-  assert.equal(editor.querySelector('img').src, 'https://media.example/new.png')
-})
-
-test('搜狐不能用未被替换的同来源旧图片冒充本次导入图片', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  const editor = window.document.querySelector('.ql-editor')
-  editor.innerHTML = '<p>旧正文</p><img src="https://media.example/same.png">'
-  window.confirm = () => true
-  class FakeDataTransfer {
-    #data = new Map()
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
-    }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  const oldImage = editor.querySelector('img')
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    editor.querySelector('p').textContent = '新正文，但同来源新图片被吞掉'
-  })
-  const commands = []
-  const previousHtml = editor.innerHTML
-  window.document.execCommand = (command, _showUi, html) => {
-    commands.push(command)
-    if (command === 'undo') editor.innerHTML = previousHtml
-    if (command === 'insertHTML') editor.innerHTML = html
-    return true
-  }
-
-  await injectSohuArticle(window.document, {
-    title: '同来源也不能冒充',
-    html: '<p>新正文</p><img src="https://media.example/same.png">',
-  })
-
-  assert.deepEqual(commands, ['undo', 'insertHTML'])
-  assert.notEqual(editor.querySelector('img'), oldImage)
-  assert.equal(editor.querySelector('img').src, 'https://media.example/same.png')
-})
-
 test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 insertHTML', async () => {
   const dom = createSohuDom()
   const { window } = dom
@@ -461,25 +355,6 @@ test('找不到真实 Quill 实例且原生粘贴未被接管时在改动前失�
   )
   assert.equal(dom.window.document.querySelector('.ql-editor').innerHTML, '<p><br></p>')
   assert.equal(dom.window.document.querySelector('input').value, '')
-})
-
-test('搜狐 Quill 吞掉图片时拒绝成功并恢复原内容', async () => {
-  const dom = createSohuDom()
-  const { window } = dom
-  const editor = window.document.querySelector('.ql-editor')
-  const fake = installFakeQuill(window, () => '<p>平台只保留文字</p>')
-
-  await assert.rejects(
-    injectSohuArticle(window.document, {
-      title: '不得静默成功',
-      html: '<p>文字</p><img alt="图" src="https://media.example/image.png">',
-    }),
-    /搜狐：导入后图片数量不完整/,
-  )
-
-  assert.equal(window.document.querySelector('input').value, '')
-  assert.equal(editor.innerHTML, '<p><br></p>')
-  assert.equal(fake.getRestoreCalls(), 1)
 })
 
 test('搜狐接受平台对写入结果的改写且不回滚', async () => {

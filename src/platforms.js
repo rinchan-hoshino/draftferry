@@ -720,6 +720,17 @@ async function injectAliyunMarket(document, article, options) {
   }
 }
 
+function isTencentFormItemBoundary(element) {
+  return [...element.classList].some((className) => {
+    const normalized = className.toLowerCase()
+    return normalized.includes('form')
+      && normalized.includes('item')
+      && !['control', 'label', 'editor', 'content'].some((word) => (
+        normalized.includes(word)
+      ))
+  })
+}
+
 function isTencentDetailEditor(editor) {
   let ancestor = editor.parentElement
   for (
@@ -733,6 +744,7 @@ function isTencentDetailEditor(editor) {
       && normalizedLabelText(element) === '商品详情'
     ))
     if (hasLabel) return true
+    if (isTencentFormItemBoundary(ancestor)) return false
     ancestor = ancestor.parentElement
   }
   return false

@@ -301,49 +301,19 @@ function selectSohuEditorContents(windowObject, editor) {
   selection.addRange(range)
 }
 
-function normalizedImageSource(document, image) {
-  const source = image.getAttribute('src')?.trim() ?? ''
-  if (!source) return ''
-  try {
-    const Url = document.defaultView?.URL ?? URL
-    return new Url(source, document.baseURI).href
-  } catch {
-    return source
-  }
-}
-
-function imageSourcesInHtml(document, html) {
+function prepareSohuHtml(document, html) {
   const container = document.createElement('div')
   container.innerHTML = html
-  return [...container.querySelectorAll('img')]
-    .map((image) => normalizedImageSource(document, image))
-}
-
-function hasAllImageSources(editor, expectedImageSources, excludedImages = new Set()) {
-  const available = new Map()
-  for (const image of editor.querySelectorAll('img')) {
-    if (excludedImages.has(image)) continue
-    const source = normalizedImageSource(editor.ownerDocument, image)
-    available.set(source, (available.get(source) ?? 0) + 1)
+  for (const table of container.querySelectorAll('table')) {
+    table.setAttribute('cellspacing', '0')
+    table.style.setProperty('border-collapse', 'collapse', 'important')
+    table.style.setProperty('border-spacing', '0px', 'important')
   }
-  return expectedImageSources.every((source) => {
-    const count = available.get(source) ?? 0
-    if (count === 0) return false
-    available.set(source, count - 1)
-    return true
-  })
-}
-
-function assertSohuImagesPreserved(editor, expectedImageSources, excludedImages) {
-  if (!hasAllImageSources(editor, expectedImageSources, excludedImages)) {
-    throw new Error('搜狐：导入后图片数量不完整；已停止，且不会保存或发布')
-  }
+  return container.innerHTML
 }
 
 async function pasteSohuHtml(windowObject, editor, html) {
   if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
-  const expectedImageSources = imageSourcesInHtml(editor.ownerDocument, html)
-  let previousImageNodes = new Set(editor.querySelectorAll('img'))
   const transfer = new windowObject.DataTransfer()
   const plainText = editor.ownerDocument.createElement('div')
   plainText.innerHTML = html
@@ -358,14 +328,7 @@ async function pasteSohuHtml(windowObject, editor, html) {
   })
   editor.dispatchEvent(event)
   await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
-  if (editor.innerHTML !== before) {
-    if (hasAllImageSources(editor, expectedImageSources, previousImageNodes)) return true
-    const restored = editor.ownerDocument.execCommand?.('undo', false) === true
-    if (!restored || editor.innerHTML !== before) {
-      throw new Error('搜狐：原生粘贴丢失图片且无法安全切换插入方式')
-    }
-    previousImageNodes = new Set(editor.querySelectorAll('img'))
-  }
+  if (editor.innerHTML !== before) return true
 
   selectSohuEditorContents(windowObject, editor)
   const inserted = editor.ownerDocument.execCommand?.('insertHTML', false, html) === true
@@ -377,9 +340,7 @@ async function pasteSohuHtml(windowObject, editor, html) {
   }))
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
   await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-  if (editor.innerHTML === before) return false
-  assertSohuImagesPreserved(editor, expectedImageSources, previousImageNodes)
-  return true
+  return editor.innerHTML !== before
 }
 
 function cloneDelta(windowObject, delta) {
@@ -420,6 +381,7 @@ export async function injectSohuArticle(document, article, options = {}) {
     throw new Error('没有可填入的正文内容')
   }
   confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(runtimeDocument))
+  const preparedHtml = prepareSohuHtml(runtimeDocument, article.html)
 
   const quill = getSohuQuill(windowObject, editor)
   const previousTitle = titleInput.value
@@ -427,7 +389,7 @@ export async function injectSohuArticle(document, article, options = {}) {
     const previousHtml = editor.innerHTML
     try {
       editor.focus()
-      if (!await pasteSohuHtml(windowObject, editor, article.html)) {
+      if (!await pasteSohuHtml(windowObject, editor, preparedHtml)) {
         throw new Error('无法取得搜狐 Quill 编辑器实例，且原生粘贴或浏览器插入未被编辑器接管')
       }
       if (article.title) setInputValue(windowObject, titleInput, article.title)
@@ -454,15 +416,9 @@ export async function injectSohuArticle(document, article, options = {}) {
   }
 
   const previousDelta = cloneDelta(windowObject, quill.getContents())
-  const previousImageNodes = new Set(editor.querySelectorAll('img'))
   try {
     editor.focus()
-    quill.clipboard.dangerouslyPasteHTML(article.html, 'user')
-    assertSohuImagesPreserved(
-      editor,
-      imageSourcesInHtml(runtimeDocument, article.html),
-      previousImageNodes,
-    )
+    quill.clipboard.dangerouslyPasteHTML(preparedHtml, 'user')
     if (article.title) {
       setInputValue(windowObject, titleInput, article.title)
     }

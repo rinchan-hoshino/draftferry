@@ -281,6 +281,51 @@ test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async 
   assert.equal(clicks, 0)
 })
 
+test('腾讯云市场只在最近字段边界内关联商品详情标签', async () => {
+  const page = dom(`
+    <div class="next-form">
+      <div class="next-form-item target-detail">
+        <div class="next-form-item-label"><label>商品详情</label></div>
+        <div class="next-form-item-control"><div class="editor-shell">
+          <div class="w-e-text" contenteditable="true"></div>
+        </div></div>
+      </div>
+      <div class="next-form-item other-detail">
+        <div class="next-form-item-label"><label>客户案例</label></div>
+        <div class="next-form-item-control"><div class="editor-shell">
+          <div class="w-e-text" contenteditable="true"></div>
+        </div></div>
+      </div>
+    </div>
+  `, 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET')
+  const [target, other] = page.window.document.querySelectorAll('.w-e-text')
+  const detailLabel = page.window.document.querySelector('.target-detail label')
+  detailLabel.getBoundingClientRect = () => ({
+    left: 726, right: 783, top: 388, bottom: 406, width: 57, height: 18,
+  })
+  target.getBoundingClientRect = () => ({
+    left: 827, right: 1994, top: 422, bottom: 720, width: 1167, height: 298,
+  })
+  other.getBoundingClientRect = () => ({
+    left: 827, right: 1994, top: 1231, bottom: 1529, width: 1167, height: 298,
+  })
+  page.window.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    target.innerHTML = html
+    return true
+  }
+
+  const result = await injectPlatformArticle(page.window.document, {
+    ...article,
+    html: '<p>附件对应的商品详情</p>',
+    portableMarkdown: '附件对应的商品详情',
+  })
+
+  assert.equal(result.platformId, 'tencent-market')
+  assert.equal(target.textContent, '附件对应的商品详情')
+  assert.equal(other.innerHTML, '')
+})
+
 test('腾讯云市场接受与唯一编辑器分层的全局商品详情标签', async () => {
   const page = dom(`
     <div class="market-label"><span>商品详情</span></div>
