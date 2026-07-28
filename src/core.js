@@ -312,25 +312,107 @@ function prepareSohuHtml(document, html) {
   return container.innerHTML
 }
 
-async function pasteSohuHtml(windowObject, editor, html) {
-  if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
-  const transfer = new windowObject.DataTransfer()
-  const plainText = editor.ownerDocument.createElement('div')
-  plainText.innerHTML = html
-  transfer.setData('text/html', html)
-  transfer.setData('text/plain', plainText.textContent ?? '')
+function normalizedSohuImageSource(document, image) {
+  const source = image.getAttribute('src')?.trim() ?? ''
+  try {
+    return new (document.defaultView?.URL ?? URL)(source, document.baseURI).href
+  } catch {
+    return source
+  }
+}
+
+const SOHU_STRUCTURE_TAGS = new Set([
+  'address',
+  'article',
+  'aside',
+  'blockquote',
+  'br',
+  'dd',
+  'details',
+  'dialog',
+  'div',
+  'dl',
+  'dt',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'header',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'li',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'summary',
+  'table',
+  'tbody',
+  'td',
+  'tfoot',
+  'th',
+  'thead',
+  'tr',
+  'ul',
+])
+
+function collectSohuStructure(root) {
+  const tokens = []
+  let textBuffer = ''
+  const flushText = () => {
+    const text = textBuffer.replace(/\s+/g, ' ').trim()
+    if (text) tokens.push(`text:${text}`)
+    textBuffer = ''
+  }
+  const visit = (node) => {
+    if (node.nodeType === 3) {
+      textBuffer += node.textContent ?? ''
+      return
+    }
+    if (node.nodeType !== 1) return
+    const tag = node.tagName.toLowerCase()
+    if (tag === 'img') {
+      flushText()
+      tokens.push(`img:${normalizedSohuImageSource(node.ownerDocument, node)}`)
+      return
+    }
+    const structural = SOHU_STRUCTURE_TAGS.has(tag)
+    if (structural) flushText()
+    if (structural && tag === 'table') {
+      tokens.push(`<table:${node.getAttribute('cellspacing') ?? ''}`
+        + `:${node.style.getPropertyValue('border-collapse')}`
+        + `:${node.style.getPropertyValue('border-spacing')}>`)
+    } else if (structural) {
+      tokens.push(`<${tag}>`)
+    }
+    for (const child of node.childNodes) visit(child)
+    if (structural) {
+      flushText()
+      tokens.push(`</${tag}>`)
+    }
+  }
+  for (const child of root.childNodes) visit(child)
+  flushText()
+  return tokens
+}
+
+function expectedSohuStructure(document, html) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  return collectSohuStructure(container)
+}
+
+async function insertSohuHtml(windowObject, editor, html) {
+  const expectedStructure = expectedSohuStructure(editor.ownerDocument, html)
   selectSohuEditorContents(windowObject, editor)
   const before = editor.innerHTML
-  const event = new windowObject.ClipboardEvent('paste', {
-    bubbles: true,
-    cancelable: true,
-    clipboardData: transfer,
-  })
-  editor.dispatchEvent(event)
-  await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
-  if (editor.innerHTML !== before) return true
-
-  selectSohuEditorContents(windowObject, editor)
   const inserted = editor.ownerDocument.execCommand?.('insertHTML', false, html) === true
   if (!inserted || editor.innerHTML === before) return false
   editor.dispatchEvent(new windowObject.InputEvent('input', {
@@ -340,7 +422,11 @@ async function pasteSohuHtml(windowObject, editor, html) {
   }))
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
   await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-  return editor.innerHTML !== before
+  if (editor.innerHTML === before) return false
+  if (JSON.stringify(collectSohuStructure(editor)) !== JSON.stringify(expectedStructure)) {
+    throw new Error('搜狐：浏览器插入后正文结构顺序不一致')
+  }
+  return true
 }
 
 function cloneDelta(windowObject, delta) {
@@ -389,8 +475,8 @@ export async function injectSohuArticle(document, article, options = {}) {
     const previousHtml = editor.innerHTML
     try {
       editor.focus()
-      if (!await pasteSohuHtml(windowObject, editor, preparedHtml)) {
-        throw new Error('无法取得搜狐 Quill 编辑器实例，且原生粘贴或浏览器插入未被编辑器接管')
+      if (!await insertSohuHtml(windowObject, editor, preparedHtml)) {
+        throw new Error('无法取得搜狐 Quill 编辑器实例，且浏览器 insertHTML 未被编辑器接管')
       }
       if (article.title) setInputValue(windowObject, titleInput, article.title)
     } catch (error) {
@@ -401,7 +487,7 @@ export async function injectSohuArticle(document, article, options = {}) {
         if (editor.innerHTML !== previousHtml) {
           const restored = editor.ownerDocument.execCommand?.('undo', false) === true
           if (!restored || editor.innerHTML !== previousHtml) {
-            throw new Error('原生粘贴回滚后正文不一致', { cause: error })
+            throw new Error('浏览器插入回滚后正文不一致', { cause: error })
           }
         }
       } catch (rollbackError) {

@@ -243,7 +243,7 @@ test('搜狐可从编辑根节点属性或 Quill.find 向上查找实例', async
   assert.equal(bubbleEditor.textContent, '向上查找正文')
 })
 
-test('搜狐没有可见 Quill 实例时通过编辑器原生粘贴事件导入', async () => {
+test('搜狐无 Quill 时绕过会拆表复制图片的原生粘贴处理器', async () => {
   const dom = createSohuDom()
   const { window } = dom
   const editor = window.document.querySelector('.ql-editor')
@@ -260,37 +260,43 @@ test('搜狐没有可见 Quill 实例时通过编辑器原生粘贴事件导入'
   }
   window.DataTransfer = FakeDataTransfer
   window.ClipboardEvent = FakeClipboardEvent
+  let pasteEvents = 0
   editor.addEventListener('paste', (event) => {
+    pasteEvents += 1
     event.preventDefault()
-    editor.innerHTML = event.clipboardData.getData('text/html')
+    const parsed = new window.DOMParser().parseFromString(
+      event.clipboardData.getData('text/html'),
+      'text/html',
+    )
+    const rows = [...parsed.querySelectorAll('tr')]
+    const image = parsed.querySelector('img')
+    editor.innerHTML = `<table><tbody>${rows[0].outerHTML}</tbody></table>`
+      + `<p><br></p><table><tbody>${rows[1].outerHTML}</tbody></table>`
+      + image.outerHTML + image.outerHTML
   })
+  window.document.execCommand = (command, _showUi, html) => {
+    assert.equal(command, 'insertHTML')
+    editor.innerHTML = html
+    return true
+  }
 
   const result = await injectSohuArticle(window.document, {
-    title: '原生粘贴',
-    html: '<p>搜狐原生粘贴正文</p>',
+    title: '结构不乱',
+    html: '<table><tbody><tr><th>源系统</th></tr><tr><td>小米商城</td></tr></tbody></table><h2>流程</h2><img src="https://img.example/flow.png">',
   })
 
   assert.equal(result.bodyFilled, true)
-  assert.equal(window.document.querySelector('input').value, '原生粘贴')
-  assert.equal(editor.textContent, '搜狐原生粘贴正文')
+  assert.equal(pasteEvents, 0)
+  assert.equal(editor.querySelectorAll('table').length, 1)
+  assert.equal(editor.querySelectorAll('tr').length, 2)
+  assert.equal(editor.querySelectorAll('img').length, 1)
+  assert.equal(window.document.querySelector('input').value, '结构不乱')
 })
 
-test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 insertHTML', async () => {
+test('搜狐没有可见 Quill 实例时直接使用浏览器 insertHTML', async () => {
   const dom = createSohuDom()
   const { window } = dom
   const editor = window.document.querySelector('.ql-editor')
-  class FakeDataTransfer {
-    #data = new Map()
-    setData(type, value) { this.#data.set(type, value) }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
-    }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
   window.document.execCommand = (command, _showUi, html) => {
     assert.equal(command, 'insertHTML')
     editor.innerHTML = html
@@ -306,28 +312,129 @@ test('搜狐没有可见 Quill 实例且粘贴事件未写入时回退浏览器 
   assert.equal(window.document.querySelector('input').value, '浏览器插入')
 })
 
-test('搜狐原生粘贴后标题写入失败且无法 undo 时明确要求刷新且不要保存', async () => {
+test('搜狐 insertHTML 重排图片时拒绝成功并恢复原正文', async () => {
   const dom = createSohuDom()
   const { window } = dom
   const editor = window.document.querySelector('.ql-editor')
-  class FakeDataTransfer {
-    #data = new Map()
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command) => {
+    if (command === 'insertHTML') {
+      editor.innerHTML = '<img src="https://img.example/flow.png"><h2>流程标题</h2>'
+        + '<table><tbody><tr><th>表头</th></tr><tr><td>内容</td></tr></tbody></table>'
+      return true
     }
+    assert.equal(command, 'undo')
+    editor.innerHTML = previousHtml
+    return true
   }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    editor.innerHTML = event.clipboardData.getData('text/html')
-  })
-  window.document.execCommand = () => false
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '不得错位',
+      html: '<h2>流程标题</h2><table><tbody><tr><th>表头</th></tr><tr><td>内容</td></tr></tbody></table><img src="https://img.example/flow.png">',
+    }),
+    /搜狐：浏览器插入后正文结构顺序不一致/,
+  )
+
+  assert.equal(editor.innerHTML, previousHtml)
+  assert.equal(window.document.querySelector('input').value, '')
+})
+
+test('搜狐 insertHTML 交换同形表格行并跨普通段落移动图片时拒绝成功', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command) => {
+    if (command === 'insertHTML') {
+      editor.innerHTML = '<img src="https://img.example/flow.png"><p>第一段</p><p>第二段</p>'
+        + '<table><tbody><tr><td>第二行</td></tr><tr><td>第一行</td></tr></tbody></table>'
+      return true
+    }
+    assert.equal(command, 'undo')
+    editor.innerHTML = previousHtml
+    return true
+  }
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '完整顺序',
+      html: '<p>第一段</p><img src="https://img.example/flow.png"><p>第二段</p>'
+        + '<table><tbody><tr><td>第一行</td></tr><tr><td>第二行</td></tr></tbody></table>',
+    }),
+    /搜狐：浏览器插入后正文结构顺序不一致/,
+  )
+
+  assert.equal(editor.innerHTML, previousHtml)
+  assert.equal(window.document.querySelector('input').value, '')
+})
+
+test('搜狐 insertHTML 丢失内联元素边界空格时拒绝成功', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command) => {
+    if (command === 'insertHTML') {
+      editor.innerHTML = '<p>Hello<strong>world</strong></p>'
+      return true
+    }
+    assert.equal(command, 'undo')
+    editor.innerHTML = previousHtml
+    return true
+  }
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '空格语义',
+      html: '<p>Hello <strong>world</strong></p>',
+    }),
+    /搜狐：浏览器插入后正文结构顺序不一致/,
+  )
+
+  assert.equal(editor.innerHTML, previousHtml)
+  assert.equal(window.document.querySelector('input').value, '')
+})
+
+test('搜狐 insertHTML 将图片移过无文本语义分隔块时拒绝成功', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  const previousHtml = editor.innerHTML
+  window.document.execCommand = (command) => {
+    if (command === 'insertHTML') {
+      editor.innerHTML = '<img src="https://img.example/flow.png"><hr><p>后文</p>'
+      return true
+    }
+    assert.equal(command, 'undo')
+    editor.innerHTML = previousHtml
+    return true
+  }
+
+  await assert.rejects(
+    injectSohuArticle(window.document, {
+      title: '语义块顺序',
+      html: '<hr><img src="https://img.example/flow.png"><p>后文</p>',
+    }),
+    /搜狐：浏览器插入后正文结构顺序不一致/,
+  )
+
+  assert.equal(editor.innerHTML, previousHtml)
+  assert.equal(window.document.querySelector('input').value, '')
+})
+
+test('搜狐浏览器插入后标题写入失败且无法 undo 时明确要求刷新且不要保存', async () => {
+  const dom = createSohuDom()
+  const { window } = dom
+  const editor = window.document.querySelector('.ql-editor')
+  window.document.execCommand = (command, _showUi, html) => {
+    if (command === 'insertHTML') {
+      editor.innerHTML = html
+      return true
+    }
+    assert.equal(command, 'undo')
+    return false
+  }
   const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
   Object.defineProperty(window.HTMLInputElement.prototype, 'value', {
     configurable: true,
@@ -344,14 +451,14 @@ test('搜狐原生粘贴后标题写入失败且无法 undo 时明确要求刷�
   )
 })
 
-test('找不到真实 Quill 实例且原生粘贴未被接管时在改动前失败', async () => {
+test('找不到真实 Quill 实例且 insertHTML 未被接管时在改动前失败', async () => {
   const dom = createSohuDom()
   await assert.rejects(
     injectSohuArticle(dom.window.document, {
       title: '不应写入标题',
       html: '<p>不应写入正文</p>',
     }),
-    /无法取得搜狐 Quill 编辑器实例.*原生粘贴或浏览器插入未被编辑器接管/,
+    /无法取得搜狐 Quill 编辑器实例.*浏览器 insertHTML 未被编辑器接管/,
   )
   assert.equal(dom.window.document.querySelector('.ql-editor').innerHTML, '<p><br></p>')
   assert.equal(dom.window.document.querySelector('input').value, '')
