@@ -1,4 +1,8 @@
 import { inspectOpenEditorRoots } from './dom-roots.js'
+import {
+  collectFrameworkInstances,
+  isValidatedQuillApi,
+} from './framework-diagnostics.js'
 
 const DIAGNOSTIC_TAG_CATEGORIES = new Set([
   'article',
@@ -156,6 +160,18 @@ function collectLabels(document, pageWindow) {
     }))
 }
 
+function validatedContainerQuill(container) {
+  if (!container) return false
+  let descriptor
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(container, '__quill')
+  } catch {
+    return false
+  }
+  if (!descriptor || !Object.hasOwn(descriptor, 'value')) return false
+  return isValidatedQuillApi(descriptor.value)
+}
+
 function collectSohu(document, pageWindow) {
   return [...document.querySelectorAll('.ql-editor')].slice(0, 20).map((editor) => {
     const container = editor.closest('.ql-container')
@@ -164,12 +180,8 @@ function collectSohu(document, pageWindow) {
       editorOwnPropertyKinds: relevantOwnPropertyKinds(editor),
       container: elementSummary(container, pageWindow),
       containerOwnPropertyKinds: relevantOwnPropertyKinds(container),
-      containerHasValidatedQuill: Boolean(
-        container?.__quill
-        && typeof container.__quill.getContents === 'function'
-        && typeof container.__quill.setContents === 'function'
-        && typeof container.__quill.clipboard?.dangerouslyPasteHTML === 'function'
-      ),
+      containerHasValidatedQuill: validatedContainerQuill(container),
+      frameworkInstances: collectFrameworkInstances(editor),
       ancestors: ancestorPath(editor, document.body),
     }
   })
@@ -233,6 +245,7 @@ function collectTencent(document, pageWindow) {
       labels: collectLabels(root, rootWindow),
       wangEditors: wangEditors.slice(0, 20).map((element) => ({
         ...elementSummary(element, rootWindow),
+        frameworkInstances: collectFrameworkInstances(element),
         ancestors: ancestorPath(element, rootDocument.body),
       })),
       editableCandidates: editableCandidates.slice(0, 20).map((element) => ({
@@ -257,7 +270,7 @@ export function collectPlatformDiagnostics({
   version,
 }) {
   const diagnostics = {
-    schema: 2,
+    schema: 3,
     draftferryVersion: version,
     platformId,
     pageBridge: pageWindow !== document.defaultView,
