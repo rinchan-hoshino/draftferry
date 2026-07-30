@@ -150,6 +150,36 @@ test('搜狐诊断从 Vue 组件数据找到关联编辑器的 Quill API，但�
   assert.equal(text.includes('quill-root'), true)
 })
 
+test('搜狐诊断沿 Vue 2 $parent 父链找到真实编辑器组件中的 Quill', () => {
+  const dom = new JSDOM('<div class="ql-editor" contenteditable="true"></div>')
+  const target = dom.window.document.querySelector('.ql-editor')
+  const quill = {
+    root: target,
+    container: target.parentElement,
+    clipboard: { dangerouslyPasteHTML() {} },
+    getContents() {},
+    setContents() {},
+    getLength() {},
+  }
+  let component = { _data: { quill } }
+  for (let depth = 0; depth < 8; depth += 1) component = { $parent: component }
+  Object.defineProperty(target, '__vue__', {
+    configurable: true,
+    value: component,
+  })
+
+  const result = collectFrameworkInstances(target)
+
+  assert.deepEqual(result.candidates, [{
+    ownerKind: 'vue2',
+    ancestorDepth: 0,
+    apiKind: 'quill',
+    discoveryDepth: 10,
+    relation: 'quill-root',
+  }])
+  assert.equal(result.truncated, false)
+})
+
 test('框架诊断不调用候选自定义 contains，并对整次扫描共享 owner 与对象预算', () => {
   const dom = new JSDOM('<div id="target"></div>', { url: 'https://example.invalid/' })
   const target = dom.window.document.querySelector('#target')
@@ -237,6 +267,60 @@ test('腾讯云诊断扫描页面主上下文、开放 ShadowRoot 和同源 ifra
   assert.equal(text.includes('example.invalid'), false)
   assert.equal(text.includes('serviceprovider'), false)
   assert.equal(text.includes('private-editor'), false)
+})
+
+test('腾讯诊断只沿 React 父 Fiber 和 Hook next 链找到较深的 WangEditor', () => {
+  const dom = new JSDOM('<div class="w-e-text" contenteditable="true"></div>')
+  const target = dom.window.document.querySelector('.w-e-text')
+  const wangEditor = {
+    setHtml() {},
+    getHtml() {},
+    clear() {},
+    dangerouslyInsertHtml() {},
+  }
+  const unrelatedEditor = {
+    setHtml() {},
+    getHtml() {},
+    clear() {},
+    dangerouslyInsertHtml() {},
+  }
+  const secondHook = { memoizedState: wangEditor, next: null }
+  const firstHook = { memoizedState: { current: null }, next: secondHook }
+  let fiber = { memoizedState: firstHook, return: null }
+  for (let depth = 0; depth < 9; depth += 1) fiber = { return: fiber }
+  fiber.child = { memoizedProps: { editor: unrelatedEditor } }
+  fiber.sibling = { memoizedProps: { editor: unrelatedEditor } }
+  fiber.alternate = { memoizedProps: { editor: unrelatedEditor } }
+  Object.defineProperty(target, '__reactFiber$PRIVATE_SUFFIX', {
+    configurable: true,
+    value: fiber,
+  })
+
+  const result = collectFrameworkInstances(target)
+
+  assert.deepEqual(result.candidates, [{
+    ownerKind: 'reactFiber',
+    ancestorDepth: 0,
+    apiKind: 'wang-editor',
+    discoveryDepth: 12,
+    relation: 'framework-owner',
+  }])
+  assert.equal(result.truncated, false)
+  assert.equal(JSON.stringify(result).includes('PRIVATE'), false)
+})
+
+test('框架诊断将固定深度截断计入 truncated', () => {
+  const dom = new JSDOM('<div class="w-e-text" contenteditable="true"></div>')
+  const target = dom.window.document.querySelector('.w-e-text')
+  Object.defineProperty(target, '__reactFiber$PRIVATE_SUFFIX', {
+    configurable: true,
+    value: { return: { return: { return: null } } },
+  })
+
+  const result = collectFrameworkInstances(target, { maxDepth: 1 })
+
+  assert.deepEqual(result.candidates, [])
+  assert.equal(result.truncated, true)
 })
 
 test('腾讯诊断从 React Fiber 找到 WangEditor API，但不输出 Fiber 名称或组件值', () => {

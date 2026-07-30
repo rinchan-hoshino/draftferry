@@ -6,12 +6,8 @@ const OWNER_KINDS = {
 }
 
 const FRAMEWORK_GRAPH_EDGES = [
-  '$refs',
+  '$parent',
   '_data',
-  'alternate',
-  'child',
-  'componentInstance',
-  'context',
   'ctx',
   'current',
   'data',
@@ -20,18 +16,16 @@ const FRAMEWORK_GRAPH_EDGES = [
   'exposed',
   'memoizedProps',
   'memoizedState',
+  'next',
   'parent',
   'pendingProps',
   'props',
-  'provides',
   'proxy',
   'quill',
   'ref',
   'return',
   'setupState',
-  'sibling',
   'stateNode',
-  'subTree',
   'value',
 ]
 
@@ -114,6 +108,22 @@ function isTraversable(value, targetWindow) {
   return true
 }
 
+function traversableEdgeValues(value, targetWindow) {
+  const values = []
+  for (const name of FRAMEWORK_GRAPH_EDGES) {
+    let descriptor
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, name)
+    } catch {
+      continue
+    }
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) continue
+    if (!isTraversable(descriptor.value, targetWindow)) continue
+    values.push(descriptor.value)
+  }
+  return values
+}
+
 function scanOwnerReference(reference, context) {
   const queue = [{ value: reference, depth: 0 }]
   while (queue.length > 0) {
@@ -139,18 +149,16 @@ function scanOwnerReference(reference, context) {
         relation: candidateRelation(current.value, context.target, kind),
       })
     }
-    if (current.depth >= context.maxDepth || kind) continue
-
-    for (const name of FRAMEWORK_GRAPH_EDGES) {
-      let descriptor
-      try {
-        descriptor = Object.getOwnPropertyDescriptor(current.value, name)
-      } catch {
-        continue
+    if (kind) continue
+    const edgeValues = traversableEdgeValues(current.value, context.targetWindow)
+    if (current.depth >= context.maxDepth) {
+      if (edgeValues.some((value) => !context.objectSeen.has(value))) {
+        context.budget.truncated = true
       }
-      if (!descriptor || !Object.hasOwn(descriptor, 'value')) continue
-      if (!isTraversable(descriptor.value, context.targetWindow)) continue
-      queue.push({ value: descriptor.value, depth: current.depth + 1 })
+      continue
+    }
+    for (const value of edgeValues) {
+      queue.push({ value, depth: current.depth + 1 })
     }
   }
 }
@@ -203,7 +211,7 @@ export function collectFrameworkInstances(target, options = {}) {
         candidateObjects,
         objectSeen,
         budget,
-        maxDepth: options.maxDepth ?? 6,
+        maxDepth: options.maxDepth ?? 20,
         maxObjects,
       })
     }
