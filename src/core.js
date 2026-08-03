@@ -3,8 +3,6 @@ import { Marked } from 'marked'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 
-import { isValidatedQuillApi } from './framework-diagnostics.js'
-
 const TITLE_SELECTOR = 'input[placeholder*="标题"]'
 const EDITOR_SELECTOR = '.ql-editor'
 
@@ -256,81 +254,51 @@ export function confirmPotentialOverwrite(windowObject, hasExistingContent) {
   }
 }
 
-function dataProperty(object, name) {
-  let current = object
-  for (let depth = 0; current && depth < 6; depth += 1) {
-    try {
-      const descriptor = Object.getOwnPropertyDescriptor(current, name)
-      if (descriptor) return Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
-      current = Object.getPrototypeOf(current)
-    } catch {
-      return undefined
-    }
-  }
-  return undefined
-}
-
-function ownDataProperty(object, name) {
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(object, name)
-    return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function associatedSohuQuill(candidate, editor) {
+function isSohuQuill(candidate) {
   return Boolean(
-    isValidatedQuillApi(candidate)
-    && dataProperty(candidate, 'root') === editor
+    candidate
+    && typeof candidate.getContents === 'function'
+    && typeof candidate.setContents === 'function'
+    && typeof candidate.clipboard?.dangerouslyPasteHTML === 'function'
   )
 }
 
-function getVueReactiveQuillSlot(data) {
-  if (!data || typeof data !== 'object') return null
-  const observer = ownDataProperty(data, '__ob__')
-  if (!observer || typeof observer !== 'object') return null
-  let descriptor
-  try {
-    descriptor = Object.getOwnPropertyDescriptor(data, 'quill')
-  } catch {
-    return null
+function getSohuQuill(windowObject, editor) {
+  const candidates = []
+  let node = editor
+  for (let depth = 0; node && node !== editor.ownerDocument.body && depth < 5; depth += 1) {
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(node))) {
+      if ('value' in descriptor && isSohuQuill(descriptor.value)) {
+        candidates.push(descriptor.value)
+      }
+    }
+    node = node.parentElement
   }
-  if (
-    !descriptor
-    || typeof descriptor.get !== 'function'
-    || typeof descriptor.set !== 'function'
-  ) return null
-  return { data, getter: descriptor.get }
+
+  const ownQuill = candidates.find(isSohuQuill)
+  if (ownQuill) return ownQuill
+
+  const container = editor.closest('.ql-container')
+  const findQuill = windowObject.Quill?.find
+  if (typeof findQuill === 'function') {
+    for (const target of [editor, container]) {
+      if (!target) continue
+      try {
+        candidates.push(findQuill.call(windowObject.Quill, target, true))
+      } catch {
+        // Some microfrontend Quill bridges reject nodes they do not own.
+      }
+    }
+  }
+  return candidates.find(isSohuQuill) ?? null
 }
 
-function getSohuQuill(editor) {
-  const seenComponents = new Set()
-  const slotsByData = new Map()
-  let element = editor
-  for (let ancestorDepth = 0; element && ancestorDepth <= 8; ancestorDepth += 1) {
-    let component = ownDataProperty(element, '__vue__')
-    for (let componentDepth = 0; component && componentDepth <= 20; componentDepth += 1) {
-      if (
-        (typeof component !== 'object' && typeof component !== 'function')
-        || seenComponents.has(component)
-      ) break
-      seenComponents.add(component)
-      const data = ownDataProperty(component, '_data')
-      const slot = getVueReactiveQuillSlot(data)
-      if (slot) slotsByData.set(slot.data, slot)
-      component = ownDataProperty(component, '$parent')
-    }
-    element = element.parentElement
-  }
-  if (slotsByData.size !== 1) return null
-  const [slot] = slotsByData.values()
-  try {
-    const candidate = slot.getter.call(slot.data)
-    return associatedSohuQuill(candidate, editor) ? candidate : null
-  } catch {
-    return null
-  }
+function selectSohuEditorContents(windowObject, editor) {
+  const selection = windowObject.getSelection()
+  const range = editor.ownerDocument.createRange()
+  range.selectNodeContents(editor)
+  selection.removeAllRanges()
+  selection.addRange(range)
 }
 
 function prepareSohuHtml(document, html) {
@@ -342,6 +310,37 @@ function prepareSohuHtml(document, html) {
     table.style.setProperty('border-spacing', '0px', 'important')
   }
   return container.innerHTML
+}
+
+async function pasteSohuHtml(windowObject, editor, html) {
+  if (!windowObject.DataTransfer || !windowObject.ClipboardEvent) return false
+  const transfer = new windowObject.DataTransfer()
+  const plainText = editor.ownerDocument.createElement('div')
+  plainText.innerHTML = html
+  transfer.setData('text/html', html)
+  transfer.setData('text/plain', plainText.textContent ?? '')
+  selectSohuEditorContents(windowObject, editor)
+  const before = editor.innerHTML
+  const event = new windowObject.ClipboardEvent('paste', {
+    bubbles: true,
+    cancelable: true,
+    clipboardData: transfer,
+  })
+  editor.dispatchEvent(event)
+  await new Promise((resolve) => windowObject.setTimeout(resolve, 20))
+  if (editor.innerHTML !== before) return true
+
+  selectSohuEditorContents(windowObject, editor)
+  const inserted = editor.ownerDocument.execCommand?.('insertHTML', false, html) === true
+  if (!inserted || editor.innerHTML === before) return false
+  editor.dispatchEvent(new windowObject.InputEvent('input', {
+    bubbles: true,
+    inputType: 'insertFromPaste',
+    data: null,
+  }))
+  editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
+  await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
+  return editor.innerHTML !== before
 }
 
 function cloneDelta(windowObject, delta) {
@@ -384,40 +383,55 @@ export async function injectSohuArticle(document, article, options = {}) {
   confirmPotentialOverwrite(windowObject, hasExistingSohuDraft(runtimeDocument))
   const preparedHtml = prepareSohuHtml(runtimeDocument, article.html)
 
-  const quill = getSohuQuill(editor)
-  if (!quill) {
-    throw new Error('无法从目标搜狐 Vue 组件取得关联的 Quill 编辑器实例')
-  }
-  const getContents = dataProperty(quill, 'getContents')
-  const setContents = dataProperty(quill, 'setContents')
-  const clipboard = dataProperty(quill, 'clipboard')
-  const dangerouslyPasteHTML = dataProperty(clipboard, 'dangerouslyPasteHTML')
+  const quill = getSohuQuill(windowObject, editor)
   const previousTitle = titleInput.value
-  const previousDelta = cloneDelta(windowObject, getContents.call(quill))
+  if (!quill) {
+    const previousHtml = editor.innerHTML
+    try {
+      editor.focus()
+      if (!await pasteSohuHtml(windowObject, editor, preparedHtml)) {
+        throw new Error('无法取得搜狐 Quill 编辑器实例，且原生粘贴或浏览器插入未被编辑器接管')
+      }
+      if (article.title) setInputValue(windowObject, titleInput, article.title)
+    } catch (error) {
+      try {
+        if (titleInput.value !== previousTitle) {
+          setInputValue(windowObject, titleInput, previousTitle)
+        }
+        if (editor.innerHTML !== previousHtml) {
+          const restored = editor.ownerDocument.execCommand?.('undo', false) === true
+          if (!restored || editor.innerHTML !== previousHtml) {
+            throw new Error('原生粘贴回滚后正文不一致', { cause: error })
+          }
+        }
+      } catch (rollbackError) {
+        throw new Error(
+          `搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
+          { cause: rollbackError },
+        )
+      }
+      throw error
+    }
+    return { titleFilled: Boolean(article.title), bodyFilled: true }
+  }
+
+  const previousDelta = cloneDelta(windowObject, quill.getContents())
   try {
     editor.focus()
-    dangerouslyPasteHTML.call(clipboard, preparedHtml, 'user')
+    quill.clipboard.dangerouslyPasteHTML(preparedHtml, 'user')
     if (article.title) {
       setInputValue(windowObject, titleInput, article.title)
     }
   } catch (error) {
-    const rollbackErrors = []
-    if (titleInput.value !== previousTitle) {
-      try {
-        setInputValue(windowObject, titleInput, previousTitle)
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError)
-      }
-    }
     try {
-      setContents.call(quill, previousDelta, 'user')
+      if (titleInput.value !== previousTitle) {
+        setInputValue(windowObject, titleInput, previousTitle)
+      }
+      quill.setContents(previousDelta, 'user')
     } catch (rollbackError) {
-      rollbackErrors.push(rollbackError)
-    }
-    if (rollbackErrors.length > 0) {
       throw new Error(
-        `搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存；原错误：${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
+        `搜狐：写入失败且无法恢复原内容；原错误：${error instanceof Error ? error.message : String(error)}`,
+        { cause: rollbackError },
       )
     }
     throw error
