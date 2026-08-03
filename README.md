@@ -11,22 +11,22 @@
 - 油猴安装文件：`draftferry.user.js`
 - 唯一安装链接：`https://acv.k-neco.com/tools/draftferry.user.js`
 
-产品名和链接不再随平台数量变化。当前版本为 `0.4.12` 诊断版；Tampermonkey 的更新与下载地址都固定到上述链接。
+产品名和链接不再随平台数量变化。当前版本为 `0.4.13`；Tampermonkey 的更新与下载地址都固定到上述链接。
 
 ## 当前平台边界
 
-| 平台 | 0.4.12 Diagnostic Preview 导入方式 |
+| 平台 | 0.4.13 Preview 导入方式 |
 | --- | --- |
 | 知乎 | 先上传 Mermaid/本地图片，再粘贴可移植 Markdown，完成“确认并解析”和“确认” |
 | 微信公众号 | 清理列表空项与列表直属空白文本后，使用 `mp_editor_set_content` 填入富文本 |
 | 开源中国 | 用户先手动切到 MD 编辑器，再填入可移植 Markdown |
 | 百家号 | 使用 UEditor 填入正文，通过 contenteditable 填入标题 |
 | 今日头条 | 通过 ProseMirror `insertHTML` 填入富文本，并将图片交给平台粘贴上传流程 |
-| 搜狐号 | 保留 0.4.9 适配器行为；真实页未通过，暂勿使用 |
+| 搜狐号 | 从目标 Vue 2 组件的响应式 `quill` 槽取得并验证实例，再使用 Quill API 原子写入与 Delta 回滚；待真实页验收 |
 | 阿里云市场 | 只向“产品详情”CKEditor 粘贴富文本，并交给平台 `uploadimage` 流程上传内嵌图片 |
 | 腾讯云市场 | 保留 0.4.9 适配器行为；仍会污染目标外页面元素，暂勿使用 |
 
-表中八项均已有可执行适配器和本地页面夹具，不再把占位报错算作适配；本地夹具已覆盖百家号、今日头条和搜狐号从同站后台通过 SPA 进入上述编辑路由后的面板挂载。云市场适配器不会改商品名称或其他基础资料；图片上传失败会恢复原商品详情。`0.4.3` 增加“复制诊断”按钮，只复制固定结构分类、数量、可见性、几何和接口存在性，不复制正文、标题、URL 路径/查询或原始 ID/类名。根据三份真实诊断，`0.4.4` 增加三条待登录验收的候选兼容路径：阿里云识别实际出现的 `.next-form-item`；搜狐在 Quill 实例不可见时尝试该编辑器已注册的原生粘贴事件，再回退浏览器 `insertHTML`；腾讯云在开放 ShadowRoot 或同源 iframe 中继续查找唯一且标注为商品详情的编辑器。`0.4.8` 的图片专项校验来自对搜狐反馈截图的误读，`0.4.9` 已删除该专项逻辑与测试，保留通用写入失败撤销保护。`0.4.10` 尝试绕过搜狐原生粘贴并改用 `insertHTML`，但真实页只写入开头片段，已验收失败并从生产回滚；该路线不得继续补丁化。腾讯 `0.4.9` 虽修正了两个 WangEditor 通过公共 form-item 误关联的问题，真实页仍会把粘贴内容污染到目标编辑器外。`0.4.11` 仅增加 schema 3 框架实例诊断，导入行为与生产 `0.4.9` 对齐：扫描编辑器祖先上的 Vue/React 框架所有者，只沿固定对象引用边、跳过 getter 和 primitive、限制深度与对象数量，报告经过 API 形状验证的 Quill 或 WangEditor 候选及目标关系；不输出正文、标题、URL、原始属性名或组件值。真实 schema 3 结果在搜狐发现 4 个 Vue 2 所有者，在腾讯两个编辑器上各发现 7 个 React Fiber 和 7 个 React Props 所有者，但均未在原 6 层范围找到实例。`0.4.12` 根据搜狐实际主包的 `this.quill` 和 Vue 2 `$parent` 关系，以及 WangEditor 官方 React `useState` 示例和 React 17 Hook 链结构，仅补充 Vue `$parent`、React 父 Fiber `return`、Hook `memoizedState/next` 与固定 editor-ref 边；移除 `child`、`sibling`、`alternate` 等横向边，深度上限提高到 20，深度截断也会报告 `truncated=true`。正式修复必须等关联实例被真实诊断证明后改走编辑器实例 API，不再使用 synthetic paste、`insertHTML` 或直接 `innerHTML`。
+表中八项均已有可执行适配器和本地页面夹具，不再把占位报错算作适配；本地夹具已覆盖百家号、今日头条和搜狐号从同站后台通过 SPA 进入上述编辑路由后的面板挂载。云市场适配器不会改商品名称或其他基础资料；图片上传失败会恢复原商品详情。`0.4.3` 增加“复制诊断”按钮，只复制固定结构分类、数量、可见性、几何和接口存在性，不复制正文、标题、URL 路径/查询或原始 ID/类名。根据三份真实诊断，`0.4.4` 增加三条待登录验收的候选兼容路径：阿里云识别实际出现的 `.next-form-item`；搜狐在 Quill 实例不可见时尝试该编辑器已注册的原生粘贴事件，再回退浏览器 `insertHTML`；腾讯云在开放 ShadowRoot 或同源 iframe 中继续查找唯一且标注为商品详情的编辑器。`0.4.8` 的图片专项校验来自对搜狐反馈截图的误读，`0.4.9` 已删除该专项逻辑与测试，保留通用写入失败撤销保护。`0.4.10` 尝试绕过搜狐原生粘贴并改用 `insertHTML`，但真实页只写入开头片段，已验收失败并从生产回滚；该路线不得继续补丁化。腾讯 `0.4.9` 虽修正了两个 WangEditor 通过公共 form-item 误关联的问题，真实页仍会把粘贴内容污染到目标编辑器外。`0.4.11` 仅增加 schema 3 框架实例诊断，导入行为与生产 `0.4.9` 对齐：扫描编辑器祖先上的 Vue/React 框架所有者，只沿固定对象引用边、跳过 getter 和 primitive、限制深度与对象数量，报告经过 API 形状验证的 Quill 或 WangEditor 候选及目标关系；不输出正文、标题、URL、原始属性名或组件值。真实 schema 3 结果在搜狐发现 4 个 Vue 2 所有者，在腾讯两个编辑器上各发现 7 个 React Fiber 和 7 个 React Props 所有者，但均未在原 6 层范围找到实例。`0.4.12` 根据搜狐实际主包的 `this.quill` 和 Vue 2 `$parent` 关系，以及 WangEditor 官方 React `useState` 示例和 React 17 Hook 链结构，仅补充 Vue `$parent`、React 父 Fiber `return`、Hook `memoizedState/next` 与固定 editor-ref 边；移除 `child`、`sibling`、`alternate` 等横向边，深度上限提高到 20，深度截断也会报告 `truncated=true`。搜狐返回的 0.4.12 诊断再次发现 4 个 Vue 2 owner、无候选且未截断；当前线上 Vue 2.7.16 会把 data 字段转换成响应式 getter，解释了诊断器在“绝不调用 getter”的隐私边界下为何不能取出 `this.quill`。`0.4.13` 只在实际 `.ql-editor` 的 Vue `$parent` 链上寻找带 Observer 证据的固定 `_data.quill` 响应式槽，调用该唯一 getter 后验证 Quill API 和 `root` 关联；搜狐正文不再使用 native/synthetic paste、`insertHTML` 或直接 `innerHTML`，失败通过原标题和 Quill Delta 回滚。腾讯本轮明确延期，保持原行为。搜狐 0.4.13 在真实登录页通过前只标记为待验收。
 
 ## 安装
 
