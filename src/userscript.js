@@ -1,6 +1,9 @@
 /* global __DRAFTFERRY_VERSION__, unsafeWindow */
 import { renderMarkdownArticle } from './core.js'
-import { collectPlatformDiagnostics } from './diagnostics.js'
+import {
+  buildDiagnosticFile,
+  downloadDiagnosticFile,
+} from './diagnostic-file.js'
 import { renderMermaidPng } from './mermaid-png.js'
 import {
   detectPlatform,
@@ -62,26 +65,6 @@ function findMarkdownFile(files) {
   return files.find((file) => /\.(?:md|markdown)$/i.test(file.name))
 }
 
-async function copyDiagnosticText(pageWindow, document, text) {
-  try {
-    if (typeof pageWindow.navigator.clipboard?.writeText === 'function') {
-      await pageWindow.navigator.clipboard.writeText(text)
-      return
-    }
-  } catch {
-    // Fall through to execCommand for browsers that restrict the Clipboard API.
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.setAttribute('style', 'position:fixed;left:-9999px;top:0')
-  document.body.append(textarea)
-  textarea.select()
-  const copied = document.execCommand?.('copy') === true
-  textarea.remove()
-  if (!copied) throw new Error('浏览器未允许复制；请截图反馈')
-}
-
 function createPanel() {
   const panel = document.createElement('section')
   panel.id = PANEL_ID
@@ -89,7 +72,7 @@ function createPanel() {
   panel.setAttribute('aria-label', '稿渡 · Markdown 一键排版 Preview')
   panel.innerHTML = `
     <button type="button" data-rin-action="import">导入 Markdown</button>
-    <button type="button" data-rin-action="diagnose">复制诊断</button>
+    <button type="button" data-rin-action="diagnose">下载诊断</button>
     <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 稿渡 Preview` : '当前平台未支持'}</span>
     <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden style="display:none !important">
   `
@@ -157,24 +140,30 @@ function createPanel() {
     fileInput.click()
   })
 
-  diagnoseButton.addEventListener('click', async () => {
+  diagnoseButton.addEventListener('click', () => {
     const platform = currentPlatform()
     if (!platform) {
       setStatus('当前页面不是已支持的平台', 'error')
       return
     }
-    setStatus('正在采集页面结构诊断…', 'busy')
+    setStatus('正在生成完整安全诊断文件…', 'busy')
     try {
       const pageWindow = getPageWindow()
       const runtimeDocument = pageWindow.document ?? document
-      const diagnostics = collectPlatformDiagnostics({
+      const diagnostics = buildDiagnosticFile({
         document: runtimeDocument,
         pageWindow,
         platformId: platform.id,
         version: __DRAFTFERRY_VERSION__,
       })
-      await copyDiagnosticText(pageWindow, runtimeDocument, diagnostics)
-      setStatus('诊断已复制；请直接粘贴到群里（不含正文和账号数据）')
+      const filename = downloadDiagnosticFile({
+        windowObject: pageWindow,
+        document: runtimeDocument,
+        text: diagnostics,
+        platformId: platform.id,
+        version: __DRAFTFERRY_VERSION__,
+      })
+      setStatus(`诊断已下载：${filename}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error), 'error')
     }

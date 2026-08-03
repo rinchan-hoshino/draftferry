@@ -30,7 +30,7 @@ assert.equal(
 )
 assert.equal(
   panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
-  '复制诊断',
+  '下载诊断',
 )
 assert.match(
   panel.querySelector('[data-rin-status]')?.textContent ?? '',

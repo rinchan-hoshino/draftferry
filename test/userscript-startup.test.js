@@ -43,11 +43,12 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
   }
 
   dom.window.MutationObserver = RecordingMutationObserver
-  let copiedDiagnostic = ''
-  Object.defineProperty(dom.window.navigator, 'clipboard', {
-    configurable: true,
-    value: { async writeText(text) { copiedDiagnostic = text } },
-  })
+  let downloadedFilename = ''
+  dom.window.URL.createObjectURL = () => 'blob:diagnostic'
+  dom.window.URL.revokeObjectURL = () => {}
+  dom.window.HTMLAnchorElement.prototype.click = function click() {
+    downloadedFilename = this.download
+  }
 
   await withUserscriptGlobals(dom, async () => {
     globalThis.MutationObserver = RecordingMutationObserver
@@ -56,12 +57,12 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
     assert.ok(panel)
     assert.equal(
       panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
-      '复制诊断',
+      '下载诊断',
     )
+    assert.equal(panel.querySelector('[data-rin-action="sohu-preflight"]'), null)
     panel.querySelector('[data-rin-action="diagnose"]').click()
-    await new Promise((resolve) => dom.window.setTimeout(resolve, 0))
-    assert.match(copiedDiagnostic, /"draftferryVersion": "test-version"/)
-    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已复制/)
+    assert.match(downloadedFilename, /^draftferry-diagnostic-zhihu-test-version-/)
+    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已下载/)
 
     const fileInput = panel.querySelector('[data-rin-files]')
     assert.equal(fileInput.style.getPropertyValue('display'), 'none')
@@ -73,6 +74,43 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
     panel.remove()
     observers[0].callback()
     assert.ok(dom.window.document.querySelector('#rin-draftferry-panel'))
+  })
+})
+
+test('搜狐页面单击下载诊断即可取得全页结构和实例分层结果', async () => {
+  const dom = new JSDOM(`<!doctype html><html><head><meta name="rin-platform-fixture" content="sohu"></head><body>
+    <div class="ql-container"><div class="ql-editor" contenteditable="true"><p><br></p></div></div>
+  </body></html>`, { url: 'file:///draftferry-sohu-diagnostic.html' })
+  disableAutomaticMutationCallbacks(dom)
+  let createdBlob = null
+  let downloadedFilename = ''
+  dom.window.Blob = class {
+    constructor(parts, options) {
+      this.parts = parts
+      this.options = options
+      createdBlob = this
+    }
+  }
+  dom.window.URL.createObjectURL = () => 'blob:diagnostic'
+  dom.window.URL.revokeObjectURL = () => {}
+  dom.window.HTMLAnchorElement.prototype.click = function click() {
+    downloadedFilename = this.download
+  }
+
+  await withUserscriptGlobals(dom, async () => {
+    await import(`../src/userscript.js?sohu-diagnostic-test=${Date.now()}`)
+    const panel = dom.window.document.querySelector('#rin-draftferry-panel')
+    const button = panel.querySelector('[data-rin-action="diagnose"]')
+
+    assert.equal(button?.textContent, '下载诊断')
+    assert.equal(panel.querySelector('[data-rin-action="sohu-preflight"]'), null)
+    button.click()
+
+    const result = JSON.parse(createdBlob.parts.join(''))
+    assert.match(downloadedFilename, /^draftferry-diagnostic-sohu-test-version-/)
+    assert.equal(result.safeDomMap.elementCount > 0, true)
+    assert.equal(result.sohuEditorPreflight.result, 'slot-missing')
+    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已下载/)
   })
 })
 
