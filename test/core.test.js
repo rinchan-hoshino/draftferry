@@ -52,6 +52,8 @@ test('将代表性 Markdown 转成经过清理的富文本与可移植 Markdown'
   assert.match(article.html, /<pre[^>]+style=/i)
   assert.match(article.html, /<img[^>]+data-rin-mermaid="true"/i)
   assert.match(article.html, /data:image\/png;base64,bWVybWFpZA==/)
+  const renderedDocument = new JSDOM(article.html).window.document
+  assert.equal(renderedDocument.querySelector('img[data-rin-mermaid]')?.parentElement?.tagName, 'P')
   assert.doesNotMatch(article.portableMarkdown, /^# 测试文章$/m)
   assert.doesNotMatch(article.portableMarkdown, /```mermaid/)
   assert.doesNotMatch(article.portableMarkdown, /<script|onerror/i)
@@ -182,7 +184,7 @@ test('通过搜狐 Quill API 原子填入内容，但不触发保存或发布', 
   assert.equal(publishes, 0)
 })
 
-test('搜狐导入时强制表格零间距并折叠相邻边框', async () => {
+test('搜狐导入时强制表格零间距并移除结构标签间的空白文本', async () => {
   const dom = createSohuDom()
   const { window } = dom
   let insertedHtml = ''
@@ -193,7 +195,14 @@ test('搜狐导入时强制表格零间距并折叠相邻边框', async () => {
 
   await injectSohuArticle(window.document, {
     title: '连体表格',
-    html: '<table style="width:100%"><tbody><tr><td style="border:1px solid #ccc">左</td><td style="border:1px solid #ccc">右</td></tr></tbody></table>',
+    html: `<table style="width:100%">
+      <thead>
+        <tr><th>左</th><th>右</th></tr>
+      </thead>
+      <tbody>
+        <tr><td style="border:1px solid #ccc">甲</td><td style="border:1px solid #ccc">乙</td></tr>
+      </tbody>
+    </table>`,
   })
 
   const inserted = new window.DOMParser().parseFromString(insertedHtml, 'text/html')
@@ -202,6 +211,13 @@ test('搜狐导入时强制表格零间距并折叠相邻边框', async () => {
   assert.equal(table.style.getPropertyValue('border-collapse'), 'collapse')
   assert.equal(table.style.getPropertyPriority('border-collapse'), 'important')
   assert.equal(table.style.getPropertyValue('border-spacing'), '0px')
+  assert.equal(
+    [table, ...table.querySelectorAll('thead, tbody, tfoot, tr, colgroup')]
+      .flatMap((element) => [...element.childNodes])
+      .filter((node) => node.nodeType === window.Node.TEXT_NODE && node.nodeValue.trim() === '')
+      .length,
+    0,
+  )
 })
 
 test('搜狐通过 Quill 保持完整正文、连续表格与 A-B-C 图片顺序', async () => {

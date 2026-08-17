@@ -99,7 +99,9 @@ async function replaceMermaidPlaceholders(container, mermaidSources, renderMerma
     image.setAttribute('src', pngDataUrl)
     image.setAttribute('alt', `Mermaid 流程图 ${index + 1}`)
     image.setAttribute('data-rin-mermaid', 'true')
-    placeholder.replaceWith(image)
+    const imageBlock = container.ownerDocument.createElement('p')
+    imageBlock.append(image)
+    placeholder.replaceWith(imageBlock)
   }
 }
 
@@ -363,6 +365,18 @@ function prepareSohuHtml(document, html) {
     table.setAttribute('cellspacing', '0')
     table.style.setProperty('border-collapse', 'collapse', 'important')
     table.style.setProperty('border-spacing', '0px', 'important')
+
+    // Sohu's Quill 2.0.3 turns formatting whitespace inside a table into
+    // paragraphs, which separates the header and body into different tables.
+    const structuralElements = [
+      table,
+      ...table.querySelectorAll('thead, tbody, tfoot, tr, colgroup'),
+    ]
+    for (const element of structuralElements) {
+      for (const node of [...element.childNodes]) {
+        if (node.nodeType === 3 && node.nodeValue.trim() === '') node.remove()
+      }
+    }
   }
   return container.innerHTML
 }
