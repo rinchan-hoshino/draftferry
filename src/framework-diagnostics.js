@@ -70,6 +70,13 @@ function apiKind(object) {
     && isMethod(object, 'clear')
     && isMethod(object, 'dangerouslyInsertHtml')
   ) return 'wang-editor'
+  if (isMethod(object, 'create') && isMethod(object, 'destroy') && isMethod(object, 'initSelection')) {
+    try {
+      // These are constructor-owned fields in legacy wangEditor. Like Quill's
+      // root, the userscript bridge can expose them without own descriptors.
+      if (isMethod(object.txt, 'html') && object.$textElem) return 'wang-editor-legacy'
+    } catch { /* An inaccessible editor is not an import candidate. */ }
+  }
   return null
 }
 
@@ -78,6 +85,13 @@ export function isValidatedQuillApi(object) {
 }
 
 function candidateRelation(candidate, target, kind) {
+  if (kind === 'wang-editor-legacy') {
+    try {
+      if ((candidate.$textElem.elems?.[0] ?? candidate.$textElem[0]) === target) {
+        return 'wang-editor-root'
+      }
+    } catch { /* Keep the weaker owner relation for diagnostics only. */ }
+  }
   if (kind === 'quill') {
     if (dataProperty(candidate, 'root') === target) return 'quill-root'
     const container = dataProperty(candidate, 'container')
@@ -148,6 +162,7 @@ function scanOwnerReference(reference, context) {
         discoveryDepth: current.depth,
         relation: candidateRelation(current.value, context.target, kind),
       })
+      context.onCandidate?.(current.value, kind, candidateRelation(current.value, context.target, kind))
     }
     if (kind) continue
     const edgeValues = traversableEdgeValues(current.value, context.targetWindow)
@@ -163,7 +178,7 @@ function scanOwnerReference(reference, context) {
   }
 }
 
-export function collectFrameworkInstances(target, options = {}) {
+function scanFrameworkInstances(target, options = {}, onCandidate) {
   const maxAncestors = options.maxAncestors ?? 8
   const ownerCounts = {
     vue2: 0,
@@ -213,9 +228,22 @@ export function collectFrameworkInstances(target, options = {}) {
         budget,
         maxDepth: options.maxDepth ?? 20,
         maxObjects,
+        onCandidate,
       })
     }
     element = element.parentElement
   }
   return { ownerCounts, candidates, truncated: budget.truncated }
+}
+
+export function collectFrameworkInstances(target, options = {}) {
+  return scanFrameworkInstances(target, options)
+}
+
+export function findLegacyWangEditor(target) {
+  const instances = []
+  const scan = scanFrameworkInstances(target, {}, (instance, kind, relation) => {
+    if (kind === 'wang-editor-legacy' && relation === 'wang-editor-root') instances.push(instance)
+  })
+  return !scan.truncated && instances.length === 1 ? instances[0] : null
 }

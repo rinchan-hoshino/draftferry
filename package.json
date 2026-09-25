@@ -1,14 +1,15 @@
 {
   "name": "draftferry-userscript",
-  "version": "0.4.16",
+  "version": "0.5.0",
   "description": "稿渡：为八个内容平台提供 Markdown 导入和 Mermaid 转图",
   "scripts": {
     "test": "node --test",
     "build": "node scripts/build.js",
-    "check": "npm run lint && npm test && npm run build && npm run verify:dist && npm run verify:ui",
+    "check": "npm run lint && npm test && npm run build && npm run verify:dist && npm run verify:ui && npm run verify:browser",
     "lint": "eslint src scripts test/*.js",
     "verify:dist": "node scripts/verify-dist.js",
-    "verify:ui": "node scripts/verify-ui.js"
+    "verify:ui": "node scripts/verify-ui.js",
+    "verify:browser": "node scripts/verify-browser.js"
   },
   "license": "MIT",
   "private": true,
@@ -25,6 +26,8 @@
     "esbuild": "^0.28.1",
     "eslint": "^10.8.0",
     "globals": "^16.5.0",
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "playwright-core": "1.63.0",
+    "wangeditor": "4.7.15"
   }
 }

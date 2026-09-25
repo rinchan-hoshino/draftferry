@@ -5,13 +5,14 @@ import {
   downloadDiagnosticFile,
 } from './diagnostic-file.js'
 import { renderMermaidPng } from './mermaid-png.js'
+import { createPanel, PANEL_ID } from './panel.js'
 import {
   detectPlatform,
   getPlatformById,
   injectPlatformArticle,
 } from './platforms.js'
 
-const PANEL_ID = 'rin-draftferry-panel'
+let mountedPanel
 
 function getPageWindow() {
   try {
@@ -61,82 +62,25 @@ async function collectLocalImages(files) {
   return images
 }
 
-function findMarkdownFile(files) {
-  return files.find((file) => /\.(?:md|markdown)$/i.test(file.name))
-}
-
-function createPanel() {
-  const panel = document.createElement('section')
-  panel.id = PANEL_ID
-  const platformAtCreation = currentPlatform()
-  panel.setAttribute('aria-label', '稿渡 · Markdown 一键排版 Preview')
-  panel.innerHTML = `
-    <button type="button" data-rin-action="import">导入 Markdown</button>
-    <button type="button" data-rin-action="diagnose">下载诊断</button>
-    <span data-rin-status>${platformAtCreation ? `${platformAtCreation.name} · 稿渡 Preview` : '当前平台未支持'}</span>
-    <input data-rin-files type="file" accept=".md,.markdown,image/*" multiple hidden style="display:none !important">
-  `
-  panel.setAttribute('style', [
-    'position: fixed',
-    'right: 24px',
-    'bottom: 24px',
-    'z-index: 2147483647',
-    'display: flex',
-    'align-items: center',
-    'gap: 10px',
-    'max-width: 540px',
-    'padding: 12px',
-    'border: 1px solid #e0c36c',
-    'border-radius: 8px',
-    'background: #fffdf5',
-    'box-shadow: 0 6px 24px rgba(0,0,0,.16)',
-    'font: 14px/1.4 system-ui, sans-serif',
-    'color: #333',
-  ].join(';'))
-
-  const button = panel.querySelector('[data-rin-action="import"]')
-  button.setAttribute('style', [
-    'border: 0',
-    'border-radius: 6px',
-    'padding: 8px 13px',
-    'background: #d8a522',
-    'color: #fff',
-    'font-weight: 700',
-    'cursor: pointer',
-    'white-space: nowrap',
-  ].join(';'))
-
-  const diagnoseButton = panel.querySelector('[data-rin-action="diagnose"]')
-  diagnoseButton.setAttribute('style', [
-    'border: 1px solid #d8a522',
-    'border-radius: 6px',
-    'padding: 7px 10px',
-    'background: #fff',
-    'color: #8a6500',
-    'font-weight: 700',
-    'cursor: pointer',
-    'white-space: nowrap',
-  ].join(';'))
-
-  const status = panel.querySelector('[data-rin-status]')
-  const fileInput = panel.querySelector('[data-rin-files]')
-
-  const setStatus = (message, state = 'idle') => {
-    status.textContent = message
-    status.style.color = state === 'error' ? '#b42318' : '#555'
-    button.disabled = state === 'busy'
-    diagnoseButton.disabled = state === 'busy'
-    button.style.opacity = state === 'busy' ? '.65' : '1'
-    diagnoseButton.style.opacity = state === 'busy' ? '.65' : '1'
+function createImportPanel() {
+  const platform = currentPlatform()
+  const panel = createPanel(document, platform.name)
+  const { button, diagnoseButton, fileInput, setStatus } = panel
+  let selectedUrl
+  let job
+  const checkRoute = () => {
+    if (job && job.url !== window.location.href) job.controller.abort()
   }
 
   button.addEventListener('click', () => {
+    if (job) return
     const platform = currentPlatform()
     if (!platform) {
       setStatus('当前页面不是已支持的平台', 'error')
       return
     }
     fileInput.value = ''
+    selectedUrl = window.location.href
     fileInput.click()
   })
 
@@ -146,7 +90,7 @@ function createPanel() {
       setStatus('当前页面不是已支持的平台', 'error')
       return
     }
-    setStatus('正在生成完整安全诊断文件…', 'busy')
+    setStatus('正在准备诊断文件…', 'busy')
     try {
       const pageWindow = getPageWindow()
       const runtimeDocument = pageWindow.document ?? document
@@ -170,10 +114,16 @@ function createPanel() {
   })
 
   fileInput.addEventListener('change', async () => {
+    if (job) return
     const files = [...fileInput.files]
-    const markdownFile = findMarkdownFile(files)
-    if (!markdownFile) {
-      setStatus('请选择一个 .md 或 .markdown 文件', 'error')
+    if (files.length === 0) return
+    const markdownFiles = files.filter((file) => /\.(?:md|markdown)$/i.test(file.name))
+    if (markdownFiles.length !== 1) {
+      setStatus('每次请选择一个 .md 或 .markdown 文件，可同时选择多张图片', 'error')
+      return
+    }
+    if (selectedUrl && selectedUrl !== window.location.href) {
+      setStatus('页面已切换，请在目标页面重新选择文件', 'error')
       return
     }
 
@@ -183,10 +133,12 @@ function createPanel() {
       return
     }
 
+    const controller = new window.AbortController()
+    job = { controller, url: window.location.href }
     setStatus(`正在为${platform.name}转换 Markdown 和 Mermaid…`, 'busy')
     try {
       const [markdown, localImages] = await Promise.all([
-        markdownFile.text(),
+        markdownFiles[0].text(),
         collectLocalImages(files),
       ])
       const article = await renderMarkdownArticle(markdown, {
@@ -194,30 +146,52 @@ function createPanel() {
         localImages,
         renderMermaid: renderMermaidPng,
       })
-      const result = await injectPlatformArticle(document, article, {
+      checkRoute()
+      if (controller.signal.aborted) throw new Error('页面已切换，已停止导入')
+      setStatus(`正在填入${platform.name}，编辑区域暂时锁定…`, 'busy')
+      await injectPlatformArticle(document, article, {
         fixturePlatformId: platform.id,
         pageWindow: getPageWindow(),
+        signal: controller.signal,
+        onProgress: (message) => setStatus(message, 'busy'),
       })
+      checkRoute()
+      if (controller.signal.aborted) throw new Error('页面已切换，已停止导入')
       setStatus(
-        `${platform.name}已填入（${result.mode}）${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,
+        `${platform.name}已填入${article.mermaidCount ? `，含 ${article.mermaidCount} 张 Mermaid PNG` : ''}；请预览后手动保存`,
       )
     } catch (error) {
       console.error('[稿渡 · Markdown 一键排版]', error)
       setStatus(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      job = null
+      fileInput.value = ''
     }
   })
 
-  return panel
+  return {
+    ...panel,
+    checkRoute,
+    destroy() {
+      job?.controller.abort()
+      panel.destroy()
+    },
+  }
 }
 
 function syncPanel() {
+  mountedPanel?.checkRoute()
   const panel = document.getElementById(PANEL_ID)
   if (!currentPlatform()) {
+    mountedPanel?.destroy()
+    mountedPanel = null
     panel?.remove()
     return
   }
   if (!panel && document.body) {
-    document.body.append(createPanel())
+    mountedPanel?.destroy()
+    mountedPanel = createImportPanel()
+    document.body.append(mountedPanel.host)
   }
 }
 

@@ -2,12 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
 
-import {
-  hasExistingSohuDraft,
-  hasMeaningfulEditorContent,
-  injectSohuArticle,
-  renderMarkdownArticle,
-} from '../src/core.js'
+import { renderMarkdownArticle } from '../src/core.js'
+import { hasMeaningfulEditorContent } from '../src/editor-content.js'
+import { hasExistingSohuDraft, injectSohuArticle } from '../src/sohu.js'
 
 const renderWindow = new JSDOM('').window
 

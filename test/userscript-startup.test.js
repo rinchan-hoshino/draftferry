@@ -56,15 +56,15 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
     const panel = dom.window.document.querySelector('#rin-draftferry-panel')
     assert.ok(panel)
     assert.equal(
-      panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
+      panel.shadowRoot.querySelector('[data-rin-action="diagnose"]')?.textContent,
       '下载诊断',
     )
-    assert.equal(panel.querySelector('[data-rin-action="sohu-preflight"]'), null)
-    panel.querySelector('[data-rin-action="diagnose"]').click()
+    assert.equal(panel.shadowRoot.querySelector('[data-rin-action="sohu-preflight"]'), null)
+    panel.shadowRoot.querySelector('[data-rin-action="diagnose"]').click()
     assert.match(downloadedFilename, /^draftferry-diagnostic-zhihu-test-version-/)
-    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已下载/)
+    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /诊断已下载/)
 
-    const fileInput = panel.querySelector('[data-rin-files]')
+    const fileInput = panel.shadowRoot.querySelector('[data-rin-files]')
     assert.equal(fileInput.style.getPropertyValue('display'), 'none')
     assert.equal(fileInput.style.getPropertyPriority('display'), 'important')
     assert.equal(observers.length, 1)
@@ -100,17 +100,17 @@ test('搜狐页面单击下载诊断即可取得全页结构和实例分层结�
   await withUserscriptGlobals(dom, async () => {
     await import(`../src/userscript.js?sohu-diagnostic-test=${Date.now()}`)
     const panel = dom.window.document.querySelector('#rin-draftferry-panel')
-    const button = panel.querySelector('[data-rin-action="diagnose"]')
+    const button = panel.shadowRoot.querySelector('[data-rin-action="diagnose"]')
 
     assert.equal(button?.textContent, '下载诊断')
-    assert.equal(panel.querySelector('[data-rin-action="sohu-preflight"]'), null)
+    assert.equal(panel.shadowRoot.querySelector('[data-rin-action="sohu-preflight"]'), null)
     button.click()
 
     const result = JSON.parse(createdBlob.parts.join(''))
     assert.match(downloadedFilename, /^draftferry-diagnostic-sohu-test-version-/)
     assert.equal(result.safeDomMap.elementCount > 0, true)
     assert.equal(result.sohuEditorPreflight.result, 'slot-missing')
-    assert.match(panel.querySelector('[data-rin-status]').textContent, /诊断已下载/)
+    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /诊断已下载/)
   })
 })
 

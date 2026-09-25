@@ -1,9 +1,11 @@
 import {
   confirmPotentialOverwrite,
   hasMeaningfulEditorContent,
-  injectSohuArticle,
-} from './core.js'
-import { collectOpenEditorRoots } from './dom-roots.js'
+} from './editor-content.js'
+import { findSohuEditor, injectSohuArticle } from './sohu.js'
+import { injectTencentMarket } from './tencent-market.js'
+import { dataImageUrlToBlob, imageFileExtension } from './image-data.js'
+import { preservingFocus, withEditorLock } from './editor-lock.js'
 
 const PLATFORMS = [
   { id: 'zhihu', name: '知乎', hosts: ['zhihu.com'] },
@@ -229,9 +231,11 @@ function invokeWechatEditor(windowObject, html) {
     const finish = (error) => {
       if (settled) return
       settled = true
+      windowObject.clearTimeout(timer)
       if (error) reject(error)
       else resolve()
     }
+    const timer = windowObject.setTimeout(() => finish(new Error('微信公众号：内容接口调用超时')), 5000)
     try {
       invoke({
         apiName: 'mp_editor_set_content',
@@ -244,11 +248,10 @@ function invokeWechatEditor(windowObject, html) {
     } catch (error) {
       finish(error)
     }
-    windowObject.setTimeout(() => finish(new Error('微信公众号：内容接口调用超时')), 5000)
   })
 }
 
-async function injectWechat(document, article, windowObject = document.defaultView) {
+async function injectWechat(document, article, windowObject = document.defaultView, assertCurrent = () => {}) {
   const titleControl = document.querySelector('#title')
   const bodyEditor = pickWechatBodyEditor(document)
   if (!titleControl || !bodyEditor) {
@@ -267,6 +270,7 @@ async function injectWechat(document, article, windowObject = document.defaultVi
 
   const preparedHtml = prepareWechatHtml(document, article.html)
   await invokeWechatEditor(windowObject, preparedHtml)
+  assertCurrent()
   writeControl(windowObject, titleControl, article.title)
 
   return {
@@ -335,10 +339,12 @@ async function injectToutiao(document, article, windowObject = document.defaultV
   if (typeof document.execCommand !== 'function') {
     throw new Error('今日头条：浏览器不支持 insertHTML 编辑命令')
   }
-  editor.focus()
-  selectEditorEnd(windowObject, editor)
   const pastedHtml = prepareToutiaoPastedHtml(document, article.html)
-  const accepted = Boolean(document.execCommand('insertHTML', false, pastedHtml))
+  const accepted = preservingFocus(windowObject, () => {
+    editor.focus({ preventScroll: true })
+    selectEditorEnd(windowObject, editor)
+    return Boolean(document.execCommand('insertHTML', false, pastedHtml))
+  })
   if (!accepted) throw new Error('今日头条：编辑器拒绝 insertHTML')
   editor.dispatchEvent(new windowObject.InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }))
   editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
@@ -386,24 +392,8 @@ async function waitForButton(
   })
 }
 
-function dataImageUrlToBlob(windowObject, source, platformName = '知乎') {
-  const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i)
-  if (!match) {
-    throw new Error(`${platformName}：内嵌图片不是有效的 Base64 图片`)
-  }
-  const binary = windowObject.atob(match[2])
-  const bytes = windowObject.Uint8Array.from(binary, (character) => character.charCodeAt(0))
-  return new windowObject.Blob([bytes], { type: match[1].toLowerCase() })
-}
-
-function imageFileExtension(mimeType) {
-  const subtype = mimeType.split('/')[1]?.toLowerCase() ?? 'png'
-  if (subtype === 'jpeg') return 'jpg'
-  return subtype.replace(/[^a-z0-9]/g, '') || 'png'
-}
-
 async function uploadZhihuDataImage(windowObject, source, index) {
-  const blob = dataImageUrlToBlob(windowObject, source)
+  const blob = dataImageUrlToBlob(windowObject, source, '知乎')
   const formData = new windowObject.FormData()
   const extension = imageFileExtension(blob.type)
   formData.append('picture', blob, `draftferry-${index + 1}.${extension}`)
@@ -474,17 +464,20 @@ async function injectZhihu(document, article, options) {
   let pasteDispatched = false
   try {
     const markdown = await prepareZhihuMarkdown(document, article, windowObject)
+    options.assertCurrent?.()
     const transfer = new windowObject.DataTransfer()
     transfer.setData('text/plain', markdown)
     const buttonsBeforePaste = new Set(
       [...document.querySelectorAll('button')].filter(isActionableButton),
     )
-    editor.focus()
-    editor.dispatchEvent(new windowObject.ClipboardEvent('paste', {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: transfer,
-    }))
+    preservingFocus(windowObject, () => {
+      editor.focus({ preventScroll: true })
+      editor.dispatchEvent(new windowObject.ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+      }))
+    })
     pasteDispatched = true
     const timeoutMs = options.waitTimeoutMs ?? 5000
     const parseButton = await waitForButton(
@@ -494,6 +487,7 @@ async function injectZhihu(document, article, options) {
       buttonsBeforePaste,
     )
     if (!parseButton) throw new Error('知乎：没有出现“确认并解析”')
+    options.assertCurrent?.()
     const parseDialog = parseButton.closest([
       '[role="dialog"]',
       '[aria-modal="true"]',
@@ -517,9 +511,11 @@ async function injectZhihu(document, article, options) {
       parseDialog,
     )
     if (!confirmButton) throw new Error('知乎：没有出现解析后的“确认”')
+    options.assertCurrent?.()
     confirmButton.click()
     writeControl(windowObject, titleControl, article.title)
   } catch (error) {
+    options.assertCurrent?.()
     writeControl(windowObject, titleControl, previousTitle)
     if (pasteDispatched) {
       document.execCommand('undo', false)
@@ -675,19 +671,23 @@ async function injectAliyunMarket(document, article, options) {
   let uploadObservation
   try {
     await setCkEditorData(windowObject, editor, '')
+    options.assertCurrent?.()
     uploadObservation = observeAliyunUploadResponses(
       windowObject,
       editor,
       articleImages.embeddedCount,
       options.imageUploadTimeoutMs ?? 30_000,
     )
-    editor.focus?.()
-    editor.fire('paste', {
-      type: 'html',
-      method: 'paste',
-      dataValue: article.html,
+    preservingFocus(windowObject, () => {
+      editor.focus?.()
+      editor.fire('paste', {
+        type: 'html',
+        method: 'paste',
+        dataValue: article.html,
+      })
     })
     await uploadObservation.promise
+    options.assertCurrent?.()
     await waitForCloudImages(
       windowObject,
       () => editor.getData() ?? '',
@@ -698,6 +698,7 @@ async function injectAliyunMarket(document, article, options) {
   } catch (error) {
     uploadObservation?.cancel()
     abortAliyunUploads(editor)
+    options.assertCurrent?.()
     try {
       await setCkEditorData(windowObject, editor, previousHtml)
       if ((editor.getData() ?? '') !== previousHtml) {
@@ -720,293 +721,6 @@ async function injectAliyunMarket(document, article, options) {
   }
 }
 
-function isTencentFormItemBoundary(element) {
-  return [...element.classList].some((className) => {
-    const normalized = className.toLowerCase()
-    return normalized.includes('form')
-      && normalized.includes('item')
-      && !['control', 'label', 'editor', 'content'].some((word) => (
-        normalized.includes(word)
-      ))
-  })
-}
-
-function isTencentDetailEditor(editor) {
-  let ancestor = editor.parentElement
-  for (
-    let depth = 0;
-    ancestor && ancestor !== editor.ownerDocument.body && depth < 6;
-    depth += 1
-  ) {
-    const hasLabel = [...ancestor.querySelectorAll('label, span, div')].some((element) => (
-      element !== editor
-      && !editor.contains(element)
-      && normalizedLabelText(element) === '商品详情'
-    ))
-    if (hasLabel) return true
-    if (isTencentFormItemBoundary(ancestor)) return false
-    ancestor = ancestor.parentElement
-  }
-  return false
-}
-
-function hasRenderedBox(element) {
-  const rect = element.getBoundingClientRect()
-  return rect.width > 0 && rect.height > 0
-}
-
-function isVisuallyAssociatedTencentField(label, editor) {
-  if (!hasRenderedBox(label) || !hasRenderedBox(editor)) return false
-  const labelRect = label.getBoundingClientRect()
-  const editorRect = editor.getBoundingClientRect()
-  const verticalOverlap = Math.min(labelRect.bottom, editorRect.bottom)
-    - Math.max(labelRect.top, editorRect.top)
-  const rowGap = Math.max(0, editorRect.left - labelRect.right)
-  const sameRow = verticalOverlap > 0
-    && labelRect.right <= editorRect.right
-    && rowGap <= 400
-  const horizontalOverlap = Math.min(labelRect.right, editorRect.right)
-    - Math.max(labelRect.left, editorRect.left)
-  const columnGap = editorRect.top - labelRect.bottom
-  const stacked = horizontalOverlap > 0 && columnGap >= 0 && columnGap <= 120
-  return sameRow || stacked
-}
-
-function findTencentDetailEditor(document) {
-  const matches = new Set()
-  for (const root of collectOpenEditorRoots(document)) {
-    const allEditors = [...root.querySelectorAll('.w-e-text[contenteditable="true"]')]
-    for (const editor of allEditors.filter(isTencentDetailEditor)) matches.add(editor)
-
-    const detailLabels = [...root.querySelectorAll('label, span, div')].filter((element) => (
-      normalizedLabelText(element) === '商品详情'
-      && (element.matches('label, span') || element.children.length === 0)
-    ))
-    for (const editor of allEditors) {
-      if (detailLabels.some((label) => isVisuallyAssociatedTencentField(label, editor))) {
-        matches.add(editor)
-      }
-    }
-  }
-  if (matches.size === 1) return [...matches][0]
-  throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
-}
-
-function dispatchTencentInput(windowObject, editor, inputType) {
-  editor.dispatchEvent(new windowObject.InputEvent('input', {
-    bubbles: true,
-    inputType,
-  }))
-}
-
-function selectTencentEditor(windowObject, editor, collapseToEnd = false) {
-  editor.focus()
-  const selection = windowObject.getSelection()
-  const range = windowObject.document.createRange()
-  range.selectNodeContents(editor)
-  range.collapse(collapseToEnd)
-  selection.removeAllRanges()
-  selection.addRange(range)
-}
-
-function formDataContainsFile(windowObject, body, fileName) {
-  return body instanceof windowObject.FormData && [...body.values()].some((value) => (
-    value instanceof windowObject.File && value.name === fileName
-  ))
-}
-
-function captureTencentUploadRequests(windowObject, fileName) {
-  const requests = []
-  const controllers = []
-  const xhrPrototype = windowObject.XMLHttpRequest?.prototype
-  const originalSend = xhrPrototype?.send
-  const originalFetch = windowObject.fetch
-  if (originalSend) {
-    xhrPrototype.send = function (body) {
-      if (formDataContainsFile(windowObject, body, fileName)) requests.push(this)
-      return originalSend.call(this, body)
-    }
-  }
-  if (typeof originalFetch === 'function' && windowObject.AbortController) {
-    windowObject.fetch = (input, init = {}) => {
-      if (init.signal || !formDataContainsFile(windowObject, init.body, fileName)) {
-        return originalFetch.call(windowObject, input, init)
-      }
-      const controller = new windowObject.AbortController()
-      controllers.push(controller)
-      return originalFetch.call(windowObject, input, { ...init, signal: controller.signal })
-    }
-  }
-  return {
-    stop() {
-      if (originalSend) xhrPrototype.send = originalSend
-      if (typeof originalFetch === 'function') windowObject.fetch = originalFetch
-    },
-    abort() {
-      for (const request of requests) request.abort?.()
-      for (const controller of controllers) controller.abort()
-    },
-  }
-}
-
-async function uploadTencentDataImage(windowObject, editor, source, index, timeoutMs) {
-  if (
-    !windowObject.DataTransfer
-    || !windowObject.ClipboardEvent
-    || !windowObject.File
-  ) {
-    throw new Error('腾讯云市场：浏览器缺少图片粘贴上传接口')
-  }
-  const blob = dataImageUrlToBlob(windowObject, source, '腾讯云市场')
-  const extension = imageFileExtension(blob.type)
-  const fileName = `draftferry-${index + 1}.${extension}`
-  const file = new windowObject.File([blob], fileName, { type: blob.type })
-  const transfer = new windowObject.DataTransfer()
-  if (typeof transfer.items?.add !== 'function') {
-    throw new Error('腾讯云市场：浏览器缺少图片剪贴板接口')
-  }
-
-  editor.innerHTML = '<p><br></p>'
-  dispatchTencentInput(windowObject, editor, 'deleteContent')
-  selectTencentEditor(windowObject, editor, true)
-  transfer.items.add(file)
-  const requestCapture = captureTencentUploadRequests(windowObject, fileName)
-  try {
-    editor.dispatchEvent(new windowObject.ClipboardEvent('paste', {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: transfer,
-    }))
-
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      const uploaded = [...editor.querySelectorAll('img')].find((image) => (
-        /^https?:/i.test(image.src)
-      ))
-      if (uploaded) return uploaded.src
-      await new Promise((resolve) => windowObject.setTimeout(resolve, 100))
-    }
-    requestCapture.abort()
-    await new Promise((resolve) => windowObject.setTimeout(resolve, 0))
-    throw new Error(`腾讯云市场：第 ${index + 1} 张内嵌图片上传超时`)
-  } finally {
-    requestCapture.stop()
-  }
-}
-
-async function prepareTencentArticle(windowObject, editor, article, timeoutMs) {
-  const container = parseHtml(windowObject.document, article.html)
-  const sources = [...container.querySelectorAll('img')]
-    .map((image) => image.getAttribute('src')?.trim() ?? '')
-    .filter((source) => /^data:image\//i.test(source))
-  const uploadedUrls = new Map()
-  for (const source of sources) {
-    if (!uploadedUrls.has(source)) {
-      uploadedUrls.set(
-        source,
-        await uploadTencentDataImage(
-          windowObject,
-          editor,
-          source,
-          uploadedUrls.size,
-          timeoutMs,
-        ),
-      )
-    }
-  }
-  let html = article.html
-  let portableMarkdown = article.portableMarkdown
-  for (const [source, uploadedUrl] of uploadedUrls) {
-    html = html.replaceAll(source, uploadedUrl)
-    portableMarkdown = portableMarkdown.replaceAll(source, uploadedUrl)
-  }
-  return { ...article, html, portableMarkdown }
-}
-
-function replaceTencentDetail(windowObject, editor, article) {
-  selectTencentEditor(windowObject, editor)
-
-  let pasted = false
-  if (windowObject.DataTransfer && windowObject.ClipboardEvent) {
-    const transfer = new windowObject.DataTransfer()
-    transfer.setData('text/html', article.html)
-    transfer.setData('text/plain', article.portableMarkdown)
-    const event = new windowObject.ClipboardEvent('paste', {
-      bubbles: true,
-      cancelable: true,
-      clipboardData: transfer,
-    })
-    const before = editor.innerHTML
-    editor.dispatchEvent(event)
-    pasted = event.defaultPrevented || editor.innerHTML !== before
-  }
-  if (!pasted) {
-    if (typeof windowObject.document.execCommand !== 'function') {
-      throw new Error('腾讯云市场：浏览器缺少富文本粘贴接口')
-    }
-    const accepted = windowObject.document.execCommand('insertHTML', false, article.html)
-    if (!accepted) throw new Error('腾讯云市场：商品详情编辑器拒绝 HTML')
-  }
-  dispatchTencentInput(windowObject, editor, 'insertFromPaste')
-  editor.dispatchEvent(new windowObject.Event('change', { bubbles: true }))
-}
-
-function guardTencentRollback(windowObject, editor, previousHtml, durationMs) {
-  let restoring = false
-  const restore = () => {
-    if (restoring || editor.innerHTML === previousHtml) return
-    restoring = true
-    editor.innerHTML = previousHtml
-    dispatchTencentInput(windowObject, editor, 'historyUndo')
-    restoring = false
-  }
-  restore()
-  const observer = new windowObject.MutationObserver(restore)
-  observer.observe(editor, { childList: true, subtree: true, attributes: true })
-  windowObject.setTimeout(() => observer.disconnect(), durationMs)
-}
-
-async function injectTencentMarket(document, article, options) {
-  const editor = findTencentDetailEditor(document)
-  const editorDocument = editor.ownerDocument
-  const windowObject = editorDocument.defaultView ?? options.pageWindow ?? document.defaultView
-  const previousHtml = editor.innerHTML
-  confirmPotentialOverwrite(windowObject, hasMeaningfulEditorContent(editor))
-  const uploadTimeoutMs = options.imageUploadTimeoutMs ?? 30_000
-  const expectedImages = imageState(editorDocument, article.html).count
-  try {
-    const preparedArticle = await prepareTencentArticle(
-      windowObject,
-      editor,
-      article,
-      uploadTimeoutMs,
-    )
-    replaceTencentDetail(windowObject, editor, preparedArticle)
-    await waitForCloudImages(
-      windowObject,
-      () => editor.innerHTML,
-      expectedImages,
-      '腾讯云市场',
-      uploadTimeoutMs,
-    )
-  } catch (error) {
-    guardTencentRollback(
-      windowObject,
-      editor,
-      previousHtml,
-      options.rollbackGuardMs
-        ?? Math.min(Math.max(uploadTimeoutMs, 10_000), 30_000),
-    )
-    throw error
-  }
-  return {
-    platformId: 'tencent-market',
-    titleFilled: false,
-    bodyFilled: true,
-    mode: 'html-paste',
-  }
-}
-
 const MARKDOWN_CONFIGS = {
   oschina: {
     id: 'oschina',
@@ -1020,6 +734,26 @@ const MARKDOWN_CONFIGS = {
       }
     },
   },
+}
+
+function platformLockTargets(document, platformId, windowObject) {
+  const title = queryFirst(document, ['textarea[placeholder*="标题"]', 'input[placeholder*="标题"]'])
+  let elements
+  switch (platformId) {
+    case 'oschina': elements = [title, document.querySelector('textarea')]; break
+    case 'wechat': elements = [document.querySelector('#title'), pickWechatBodyEditor(document)]; break
+    case 'baijiahao': elements = [findBaijiahaoTitle(document), windowObject.UE_V2?.instants?.ueditorInstant0?.body]; break
+    case 'zhihu': elements = [title, document.querySelector('.DraftEditor-root, .public-DraftEditor-content')]; break
+    case 'toutiao': elements = [title, document.querySelector('.ProseMirror')]; break
+    case 'sohu': elements = [title, findSohuEditor(document), document.querySelector('.ql-toolbar')]; break
+    case 'aliyun-market': {
+      const editor = findAliyunDetailEditor(document, windowObject)
+      elements = [editor.container?.$, editor.editable?.()?.$]
+      break
+    }
+    default: elements = []
+  }
+  return elements.filter(Boolean)
 }
 
 export async function injectPlatformArticle(document, article, options = {}) {
@@ -1037,35 +771,38 @@ export async function injectPlatformArticle(document, article, options = {}) {
     throw new Error('转换结果不完整，无法导入平台')
   }
 
-  if (MARKDOWN_CONFIGS[platform.id]) {
-    return injectMarkdownTextEditor(
-      runtimeDocument,
-      article,
-      MARKDOWN_CONFIGS[platform.id],
-      runtimeWindow,
-    )
-  }
-  if (platform.id === 'wechat') {
-    return injectWechat(runtimeDocument, article, runtimeWindow)
-  }
-  if (platform.id === 'baijiahao') {
-    return injectBaijiahao(runtimeDocument, article, runtimeWindow)
-  }
-  if (platform.id === 'zhihu') {
-    return injectZhihu(runtimeDocument, article, options)
-  }
-  if (platform.id === 'toutiao') {
-    return injectToutiao(runtimeDocument, article, runtimeWindow)
-  }
-  if (platform.id === 'sohu') {
-    const result = await injectSohuArticle(runtimeDocument, article, options)
-    return { platformId: 'sohu', ...result, mode: 'html-api' }
-  }
-  if (platform.id === 'aliyun-market') {
-    return injectAliyunMarket(runtimeDocument, article, options)
-  }
   if (platform.id === 'tencent-market') {
-    return injectTencentMarket(runtimeDocument, article, options)
+    return injectTencentMarket(runtimeDocument, article, { ...options, pageWindow: runtimeWindow })
   }
-  throw new Error(`${platform.name}：尚未实现导入适配器`)
+  return withEditorLock(platformLockTargets(runtimeDocument, platform.id, runtimeWindow), async (assertCurrent) => {
+    options = { ...options, assertCurrent }
+    if (MARKDOWN_CONFIGS[platform.id]) {
+      return injectMarkdownTextEditor(
+        runtimeDocument,
+        article,
+        MARKDOWN_CONFIGS[platform.id],
+        runtimeWindow,
+      )
+    }
+    if (platform.id === 'wechat') {
+      return injectWechat(runtimeDocument, article, runtimeWindow, assertCurrent)
+    }
+    if (platform.id === 'baijiahao') {
+      return injectBaijiahao(runtimeDocument, article, runtimeWindow)
+    }
+    if (platform.id === 'zhihu') {
+      return injectZhihu(runtimeDocument, article, options)
+    }
+    if (platform.id === 'toutiao') {
+      return injectToutiao(runtimeDocument, article, runtimeWindow)
+    }
+    if (platform.id === 'sohu') {
+      const result = await injectSohuArticle(runtimeDocument, article, options)
+      return { platformId: 'sohu', ...result, mode: 'html-api' }
+    }
+    if (platform.id === 'aliyun-market') {
+      return injectAliyunMarket(runtimeDocument, article, options)
+    }
+    throw new Error(`${platform.name}：尚未实现导入适配器`)
+  }, { ...options, pageWindow: runtimeWindow })
 }

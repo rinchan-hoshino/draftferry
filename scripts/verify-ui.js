@@ -25,18 +25,17 @@ await new Promise((resolve) => dom.window.setTimeout(resolve, 0))
 const panel = dom.window.document.querySelector('#rin-draftferry-panel')
 assert.ok(panel, '构建产物没有创建排版面板')
 assert.equal(
-  panel.querySelector('[data-rin-action="import"]')?.textContent,
+  panel.shadowRoot.querySelector('[data-rin-action="import"]')?.textContent,
   '导入 Markdown',
 )
 assert.equal(
-  panel.querySelector('[data-rin-action="diagnose"]')?.textContent,
+  panel.shadowRoot.querySelector('[data-rin-action="diagnose"]')?.textContent,
   '下载诊断',
 )
-assert.match(
-  panel.querySelector('[data-rin-status]')?.textContent ?? '',
-  /搜狐号 · 稿渡 Preview/,
-)
-const fileInput = panel.querySelector('[data-rin-files][multiple]')
+assert.equal(panel.getAttribute('aria-label'), '稿渡 · 搜狐号')
+assert.equal(panel.shadowRoot.querySelector('.feedback').hidden, true)
+assert.equal(panel.shadowRoot.querySelector('details').open, false)
+const fileInput = panel.shadowRoot.querySelector('[data-rin-files][multiple]')
 assert.ok(fileInput)
 assert.equal(fileInput.style.getPropertyValue('display'), 'none')
 assert.equal(fileInput.style.getPropertyPriority('display'), 'important')

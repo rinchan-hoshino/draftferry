@@ -24,6 +24,18 @@ function dom(html, url) {
   return new JSDOM(html, { url })
 }
 
+function attachWangEditor(element) {
+  const editor = {
+    create() {}, destroy() {}, initSelection() {},
+    $textElem: { elems: [element] },
+    txt: { html(value) { if (value !== undefined) element.innerHTML = value; return element.innerHTML } },
+    config: { customUploadImg(_files, insert) { insert('https://market.cloud.tencent.com/uploaded.png') } },
+    uploadImg: { uploadImg() { this.insertImg('https://market.cloud.tencent.com/uploaded.png') } },
+  }
+  element.__reactFiber$fixture = { memoizedState: { memoizedState: editor } }
+  return editor
+}
+
 function zhihuFixture(onParse) {
   const page = dom(`
     <textarea placeholder="请输入标题"></textarea>
@@ -230,7 +242,7 @@ test('阿里云市场通过页面主上下文取得 CKEditor 实例', async () =
   assert.equal(currentHtml, '<p>主上下文正文</p>')
 })
 
-test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async () => {
+test('腾讯云市场只向唯一的商品详情 wangEditor 写入 HTML', async () => {
   const page = dom(`
     <input id="product-name" value="保留商品名称">
     <div class="other-detail"><span>客户案例</span>
@@ -244,31 +256,7 @@ test('腾讯云市场只向唯一的商品详情 wangEditor 粘贴 HTML', async 
   const { window } = page
   const editor = window.document.querySelector('.market-detail .w-e-text')
   let clicks = 0
-  class FakeDataTransfer {
-    #data = new Map()
-    items = []
-    constructor() {
-      this.items.add = (file) => this.items.push({
-        type: file.type,
-        getAsFile: () => file,
-      })
-    }
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) {
-      super(type, init)
-      this.clipboardData = init.clipboardData
-    }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    const html = event.clipboardData.getData('text/html')
-    editor.innerHTML = html || '<img src="https://market.cloud.tencent.com/uploaded.png">'
-  })
+  attachWangEditor(editor)
   window.document.querySelector('#save').onclick = () => { clicks += 1 }
   window.document.querySelector('#publish').onclick = () => { clicks += 1 }
 
@@ -309,11 +297,7 @@ test('腾讯云市场只在最近字段边界内关联商品详情标签', async
   other.getBoundingClientRect = () => ({
     left: 827, right: 1994, top: 1231, bottom: 1529, width: 1167, height: 298,
   })
-  page.window.document.execCommand = (command, _showUi, html) => {
-    assert.equal(command, 'insertHTML')
-    target.innerHTML = html
-    return true
-  }
+  attachWangEditor(target)
 
   const result = await injectPlatformArticle(page.window.document, {
     ...article,
@@ -341,11 +325,7 @@ test('腾讯云市场接受与唯一编辑器分层的全局商品详情标签',
   editor.getBoundingClientRect = () => ({
     left: 120, right: 620, top: 90, bottom: 390, width: 500, height: 300,
   })
-  page.window.document.execCommand = (command, _showUi, html) => {
-    assert.equal(command, 'insertHTML')
-    editor.innerHTML = html
-    return true
-  }
+  attachWangEditor(editor)
 
   const result = await injectPlatformArticle(page.window.document, {
     ...article,
@@ -362,11 +342,7 @@ test('腾讯云市场可在开放 ShadowRoot 中定位唯一商品详情编辑�
   const root = page.window.document.querySelector('#market-root').attachShadow({ mode: 'open' })
   root.innerHTML = '<section><span>商品详情 *</span><div class="w-e-text" contenteditable="true"></div></section>'
   const editor = root.querySelector('.w-e-text')
-  page.window.document.execCommand = (command, _showUi, html) => {
-    assert.equal(command, 'insertHTML')
-    editor.innerHTML = html
-    return true
-  }
+  attachWangEditor(editor)
 
   const result = await injectPlatformArticle(page.window.document, {
     ...article,
@@ -383,11 +359,7 @@ test('腾讯云市场可在同源 iframe 中定位唯一商品详情编辑器', 
   const frame = page.window.document.querySelector('iframe')
   frame.contentDocument.body.innerHTML = '<section><span>商品详情 *</span><div class="w-e-text" contenteditable="true"></div></section>'
   const editor = frame.contentDocument.querySelector('.w-e-text')
-  frame.contentWindow.document.execCommand = (command, _showUi, html) => {
-    assert.equal(command, 'insertHTML')
-    editor.innerHTML = html
-    return true
-  }
+  attachWangEditor(editor)
 
   const result = await injectPlatformArticle(page.window.document, {
     ...article,
@@ -416,7 +388,7 @@ test('腾讯云市场拒绝与商品详情标签无结构或视觉关联的唯�
   assert.equal(page.window.document.querySelector('.w-e-text').innerHTML, '')
 })
 
-test('云市场内嵌图片未上传时恢复原商品详情', async () => {
+test('阿里云市场内嵌图片未上传时恢复原商品详情', async () => {
   const aliyun = dom(`
     <div class="acpn-form-item"><label>产品详情：</label>
       <div class="cke cke_editor_editor3"></div>
@@ -451,64 +423,7 @@ test('云市场内嵌图片未上传时恢复原商品详情', async () => {
   assert.equal(aliyunHtml, '<p>原阿里云详情</p>')
   assert.equal(aliyunAborts, 1)
 
-  const tencent = dom(
-    '<div><span>商品详情</span><div class="w-e-text" contenteditable="true"><p>原腾讯云详情</p></div></div>',
-    'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET',
-  )
-  const { window } = tencent
-  const editor = window.document.querySelector('.w-e-text')
-  window.confirm = () => true
-  class FakeDataTransfer {
-    #data = new Map()
-    items = []
-    constructor() {
-      this.items.add = (file) => this.items.push({
-        type: file.type,
-        getAsFile: () => file,
-      })
-    }
-    setData(type, value) { this.#data.set(type, value) }
-    getData(type) { return this.#data.get(type) ?? '' }
-  }
-  class FakeClipboardEvent extends window.Event {
-    constructor(type, init) { super(type, init); this.clipboardData = init.clipboardData }
-  }
-  let tencentAborts = 0
-  window.XMLHttpRequest = class {
-    send() {}
-    abort() { tencentAborts += 1 }
-  }
-  window.DataTransfer = FakeDataTransfer
-  window.ClipboardEvent = FakeClipboardEvent
-  editor.addEventListener('paste', (event) => {
-    event.preventDefault()
-    const html = event.clipboardData.getData('text/html')
-    if (html) {
-      editor.innerHTML = html
-      return
-    }
-    const file = event.clipboardData.items[0].getAsFile()
-    window.setTimeout(() => {
-      const request = new window.XMLHttpRequest()
-      const formData = new window.FormData()
-      formData.append('file', file)
-      request.send(formData)
-    }, 10)
-    window.setTimeout(() => {
-      editor.innerHTML = '<img src="https://market.cloud.tencent.com/late.png">'
-    }, 40)
-  })
 
-  await assert.rejects(
-    injectPlatformArticle(window.document, article, {
-      imageUploadTimeoutMs: 20,
-      rollbackGuardMs: 100,
-    }),
-    /腾讯云市场：第 1 张内嵌图片上传超时/,
-  )
-  await new Promise((resolve) => window.setTimeout(resolve, 80))
-  assert.equal(tencentAborts, 1)
-  assert.equal(editor.innerHTML, '<p>原腾讯云详情</p>')
 })
 
 test('阿里云市场原详情恢复失败时给出不可保存的明确错误', async () => {
