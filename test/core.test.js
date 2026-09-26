@@ -45,8 +45,9 @@ test('将代表性 Markdown 转成经过清理的富文本与可移植 Markdown'
   assert.doesNotMatch(article.html, /<h1[ >]/i)
   assert.doesNotMatch(article.html, /<script/i)
   assert.doesNotMatch(article.html, /onerror/i)
-  assert.match(article.html, /<table[^>]+style=/i)
-  assert.match(article.html, /<pre[^>]+style=/i)
+  assert.match(article.html, /<table>/i)
+  assert.match(article.html, /<pre data-rin-code-language="js">/i)
+  assert.doesNotMatch(article.html, /\sstyle=/i)
   assert.match(article.html, /<img[^>]+data-rin-mermaid="true"/i)
   assert.match(article.html, /data:image\/png;base64,bWVybWFpZA==/)
   const renderedDocument = new JSDOM(article.html).window.document

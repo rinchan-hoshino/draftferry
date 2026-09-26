@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 
@@ -12,19 +10,18 @@ const executablePath = process.env.DRAFTFERRY_CHROME_PATH ?? [
   '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
 ].find(existsSync)
 if (!executablePath) throw new Error('Set DRAFTFERRY_CHROME_PATH to an installed Chrome/Chromium executable')
-const directory = await mkdtemp(resolve(tmpdir(), 'draftferry-browser-'))
-const fixture = resolve(directory, 'fixture.html')
+const fixtureUrl = 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET'
 const helper = await build({
   stdin: { contents: "export { injectPlatformArticle } from './src/platforms.js'", resolveDir: process.cwd() },
   bundle: true, format: 'iife', globalName: 'DraftFerryTest', write: false,
 })
-await writeFile(fixture, `<!doctype html><html><head><meta charset="utf-8">
+const fixture = `<!doctype html><html><head><meta charset="utf-8">
   <meta name="rin-platform-fixture" content="tencent-market"></head><body>
   <style>body{font:16px sans-serif;padding:24px}section{margin:20px 0}.w-e-text{min-height:120px}input{width:280px}</style>
   <input id="other" value="其他字段"><p id="outside">正文外内容</p>
   <section><label>商品详情</label><div id="target"></div></section>
   <section><label>客户案例</label><div id="other-editor"></div></section>
-  </body></html>`)
+  </body></html>`
 const browser = await chromium.launch({ executablePath, headless: true })
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64')
 let checks = 0
@@ -33,8 +30,10 @@ async function check(name, run) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
   page.setDefaultTimeout(7000)
   try {
+    await page.route('**/*', route => route.abort())
+    await page.route('https://console.cloud.tencent.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }))
     await page.route('https://images.example.test/**', (route) => route.fulfill({ contentType: 'image/png', body: png }))
-    await page.goto(pathToFileURL(fixture).href)
+    await page.goto(fixtureUrl)
     await page.addScriptTag({ path: resolve('node_modules/wangeditor/dist/wangEditor.js') })
     await page.addScriptTag({ content: helper.outputFiles[0].text })
     await page.evaluate(() => {
@@ -171,7 +170,7 @@ try {
       { name: 'photo.png', mimeType: 'image/png', buffer: png },
     ])
     await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel')
-      ?.shadowRoot.querySelector('[data-rin-status]')?.textContent.includes('请预览后手动保存'))
+      ?.shadowRoot.querySelector('[data-rin-status]')?.textContent.includes('手动保存'))
     assert.equal(await page.locator('#target img').count(), 2)
     assert.equal(await page.locator('#target table').count(), 1)
     assert.match(await page.locator('#target .w-e-text').innerText(), /正文开始[\s\S]*正文结束/)
@@ -182,11 +181,117 @@ try {
       { name: 'two.md', mimeType: 'text/markdown', buffer: Buffer.from('two') },
     ])
     await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel')
-      ?.shadowRoot.querySelector('[data-rin-status]')?.textContent.includes('每次请选择一个'))
+      ?.shadowRoot.querySelector('[data-rin-status]')?.textContent.includes('每次请选择一篇'))
     assert.match(await page.locator('#target .w-e-text').innerText(), /正文开始/)
+  })
+
+  await check('missing images resume the same draft; partial upload retry skips completed images', async page => {
+    await page.evaluate(() => {
+      globalThis.uploadAttempts = []
+      globalThis.native.config.customUploadImg = (files, insert) => {
+        globalThis.uploadAttempts.push(files[0].name)
+        if (globalThis.uploadAttempts.length === 2) return Promise.reject(new Error('temporary failure'))
+        insert(`https://images.example.test/${globalThis.uploadAttempts.length}.png`)
+      }
+    })
+    await page.addScriptTag({ path: resolve('dist/draftferry.user.js') })
+    const panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles({ name: 'resume.md', mimeType: 'text/markdown', buffer: Buffer.from('# 同一篇稿件\n\n前![一](one.png)中![二](two.png)后') })
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'missing')
+    assert.equal(await page.locator('#target .w-e-text').innerText(), '原正文')
+    const chooser = page.waitForEvent('filechooser')
+    await panel.locator('[data-primary]').click()
+    await (await chooser).setFiles([
+      { name: 'one.png', mimeType: 'image/png', buffer: png },
+      { name: 'two.png', mimeType: 'image/png', buffer: Buffer.concat([png, Buffer.from('second')]) },
+    ])
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'failed')
+    assert.deepEqual(await page.evaluate(() => globalThis.uploadAttempts), ['draftferry-1.png', 'draftferry-2.png'])
+    assert.equal(await page.locator('#target .w-e-text').innerText(), '原正文')
+    assert.match(await panel.locator('.assets').innerText(), /two.png/)
+    await panel.locator('[data-primary]').click()
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'done')
+    assert.deepEqual(await page.evaluate(() => globalThis.uploadAttempts), ['draftferry-1.png', 'draftferry-2.png', 'draftferry-2.png'])
+    assert.deepEqual(await page.locator('#target img').evaluateAll(images => images.map(image => image.src)), ['https://images.example.test/1.png', 'https://images.example.test/3.png'])
+    assert.match(await page.locator('#target .w-e-text').innerText(), /前中后/)
+    assert.equal(await page.locator('#target .w-e-text [style]').count(), 0)
+  })
+
+  await check('minimized progress stays minimized; pause unlocks and late upload cannot change user text', async page => {
+    await page.addScriptTag({ path: resolve('dist/draftferry.user.js') })
+    const panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles([
+      { name: 'pause.md', mimeType: 'text/markdown', buffer: Buffer.from('# 稿件\n\n正文![图](one.png)') },
+      { name: 'one.png', mimeType: 'image/png', buffer: png },
+    ])
+    await page.waitForFunction(() => globalThis.uploadCallbacks.length === 1)
+    await panel.locator('[data-primary]').click()
+    assert.equal(await panel.locator('.workbench').isVisible(), false)
+    await page.locator('#other').fill('正常处理别的字段')
+    await panel.locator('[data-rin-action="import"]').click()
+    await panel.locator('[data-secondary]').click()
+    await page.waitForFunction(() => globalThis.document.querySelector('#target .w-e-text').getAttribute('contenteditable') === 'true')
+    await page.locator('#target .w-e-text').fill('暂停后继续手动编辑')
+    await page.evaluate(() => globalThis.uploadCallbacks[0]('https://images.example.test/late.png'))
+    assert.equal(await page.locator('#target .w-e-text').innerText(), '暂停后继续手动编辑')
+    await panel.locator('[data-primary]').click()
+    await page.waitForFunction(() => globalThis.uploadCallbacks.length === 2)
+    await panel.locator('[data-primary]').click()
+    await page.evaluate(() => globalThis.uploadCallbacks[1]('https://images.example.test/retried.png'))
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'done')
+    assert.equal(await panel.locator('.workbench').isVisible(), false)
+    assert.match(await panel.locator('[data-rin-action="import"]').innerText(), /已完成/)
+    assert.equal(await page.locator('#other').inputValue(), '正常处理别的字段')
+  })
+
+  await check('route changes retain the draft and stop late callbacks; returning requires explicit resume', async page => {
+    await page.addScriptTag({ path: resolve('dist/draftferry.user.js') })
+    let panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles([
+      { name: 'route.md', mimeType: 'text/markdown', buffer: Buffer.from('# 保留这篇\n\n继续正文![图](one.png)') },
+      { name: 'one.png', mimeType: 'image/png', buffer: png },
+    ])
+    await page.waitForFunction(() => globalThis.uploadCallbacks.length === 1)
+    await page.evaluate(() => globalThis.history.pushState(null, '', '/serviceprovider/products/list'))
+    await page.waitForFunction(() => !globalThis.document.querySelector('#rin-draftferry-panel'))
+    await page.evaluate(() => globalThis.uploadCallbacks[0]('https://images.example.test/late.png'))
+    assert.equal(await page.locator('#target .w-e-text').innerText(), '原正文')
+    assert.equal(await page.locator('#target .w-e-text').getAttribute('contenteditable'), 'true')
+    await page.evaluate(url => globalThis.history.pushState(null, '', url), fixtureUrl)
+    panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-action="import"]').click()
+    assert.equal(await panel.locator('h2').innerText(), '保留这篇')
+    assert.equal(await page.evaluate(() => globalThis.uploadCallbacks.length), 1)
+    await panel.locator('[data-primary]').click()
+    await page.waitForFunction(() => globalThis.uploadCallbacks.length === 2)
+    await page.evaluate(() => globalThis.uploadCallbacks[1]('https://images.example.test/returned.png'))
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'done')
+    assert.match(await page.locator('#target .w-e-text').innerText(), /继续正文/)
+  })
+
+  await check('new panel fits narrow viewports and keeps missing filenames readable', async page => {
+    await page.addScriptTag({ path: resolve('dist/draftferry.user.js') })
+    const panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles({ name: '云服务产品介绍.md', mimeType: 'text/markdown', buffer: Buffer.from('# 云服务产品介绍\n\n![架构](images/service-architecture-overview.png)') })
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'missing')
+    const proof = resolve('../draftferry-design-20260926/implementation')
+    await mkdir(proof, { recursive: true })
+    await panel.screenshot({ path: resolve(proof, 'missing-image.png') })
+    await page.setViewportSize({ width: 340, height: 740 })
+    const overflow = await panel.evaluate(host => {
+      const surface = host.shadowRoot.querySelector('.workbench')
+      return { width: surface.clientWidth, scroll: surface.scrollWidth, right: host.getBoundingClientRect().right }
+    })
+    assert.ok(overflow.scroll <= overflow.width + 1)
+    assert.ok(overflow.right <= 340)
+    await panel.screenshot({ path: resolve(proof, 'mobile.png') })
+    const lightBackground = await panel.evaluate(host => globalThis.getComputedStyle(host.shadowRoot.querySelector('.workbench')).backgroundColor)
+    await page.emulateMedia({ colorScheme: 'dark' })
+    const darkBackground = await panel.evaluate(host => globalThis.getComputedStyle(host.shadowRoot.querySelector('.workbench')).backgroundColor)
+    assert.notEqual(darkBackground, lightBackground)
+    await panel.screenshot({ path: resolve(proof, 'dark.png') })
   })
   console.log(`Browser verification: ${checks} scenarios passed (real wangEditor 4.7.15; isolated Chrome).`)
 } finally {
   await browser.close()
-  await rm(directory, { recursive: true, force: true })
 }

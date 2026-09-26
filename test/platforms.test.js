@@ -934,3 +934,65 @@ test('五个文章平台已有内容时取消确认不会修改页面', async ()
   }
   assert.equal(baijiahaoSetCalls, 0)
 })
+
+test('阿里云取消上传会停止加载器、移除监听并恢复原文后解锁', async () => {
+  const page = dom('<div class="acpn-form-item"><label>产品详情：</label><div class="cke cke_editor_editor3"></div></div>', 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
+  const { window } = page
+  const element = window.document.querySelector('.cke')
+  let html = '<p>原详情</p>'
+  let listener
+  let aborted = 0
+  window.confirm = () => true
+  window.CKEDITOR = { instances: { editor3: {
+    container: { $: element },
+    getData: () => html,
+    setData(value, options) { html = value; options?.callback?.() },
+    on(_name, callback) { listener = callback },
+    removeListener(_name, callback) { if (listener === callback) listener = null },
+    fire(_name, data) { html = data.dataValue },
+    uploadRepository: { loaders: { image: { abort() { aborted++ } } } },
+    focus() {},
+  } } }
+  const controller = new window.AbortController()
+  const pending = injectPlatformArticle(window.document, article, { signal: controller.signal })
+  await new Promise(resolve => window.setTimeout(resolve, 0))
+  assert.equal(typeof listener, 'function')
+  assert.equal(element.getAttribute('aria-busy'), 'true')
+  controller.abort()
+  await assert.rejects(pending, /已停止导入/)
+  assert.equal(html, '<p>原详情</p>')
+  assert.equal(aborted, 1)
+  assert.equal(listener, null)
+  assert.equal(element.hasAttribute('aria-busy'), false)
+  window.close()
+})
+
+test('知乎暂停解析时撤销只作用于正文，并恢复用户正在操作的其他输入框', async () => {
+  const { window, editor } = zhihuFixture(() => {})
+  editor.tabIndex = 0
+  const other = window.document.createElement('input')
+  other.value = '保留其他字段'
+  window.document.body.append(other)
+  let undos = 0
+  window.document.execCommand = command => {
+    assert.equal(command, 'undo')
+    assert.equal(window.document.activeElement, editor)
+    undos++
+    editor.textContent = ''
+    return true
+  }
+  const controller = new window.AbortController()
+  const pending = injectPlatformArticle(window.document, zhihuArticle, { signal: controller.signal })
+  await new Promise(resolve => window.setTimeout(resolve, 0))
+  other.focus()
+  other.setSelectionRange(1, 3)
+  controller.abort()
+  await assert.rejects(pending, /已停止导入/)
+  assert.equal(undos, 1)
+  assert.equal(editor.textContent, '')
+  assert.equal(window.document.activeElement, other)
+  assert.deepEqual([other.selectionStart, other.selectionEnd], [1, 3])
+  assert.equal(other.value, '保留其他字段')
+  assert.equal(editor.hasAttribute('aria-busy'), false)
+  window.close()
+})

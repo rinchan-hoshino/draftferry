@@ -188,24 +188,34 @@ async function prepareHtml(editor, nativeEditor, article, options, assertCurrent
   const windowObject = document.defaultView
   const content = document.createElement('div')
   content.innerHTML = article.html
-  const uploaded = new Map()
+  const uploaded = options.uploadCache ?? new Map()
+  let index = 0
   for (const image of content.querySelectorAll('img')) {
     assertCurrent()
     const source = image.getAttribute('src')?.trim() ?? ''
     if (/^data:image\//i.test(source)) {
       if (!uploaded.has(source)) {
         const blob = dataImageUrlToBlob(windowObject, source, '腾讯云市场')
-        const file = new windowObject.File([blob], `draftferry-${uploaded.size + 1}.${imageFileExtension(blob.type)}`, { type: blob.type })
-        options.onProgress?.(`正在上传第 ${uploaded.size + 1} 张图片，商品详情暂时锁定…`)
-        uploaded.set(source, await uploadImage(
-          windowObject, nativeEditor, file, uploaded.size,
-          options.imageUploadTimeoutMs ?? 30_000, options.signal,
-        ))
+        const name = options.assetNames?.get(source) ?? `图片 ${index + 1}`
+        const file = new windowObject.File([blob], `draftferry-${index + 1}.${imageFileExtension(blob.type)}`, { type: blob.type })
+        options.onProgress?.(`正在上传 ${name}…`)
+        options.onAssetProgress?.({ source, status: 'uploading' })
+        try {
+          const url = await uploadImage(windowObject, nativeEditor, file, index,
+            options.imageUploadTimeoutMs ?? 30_000, options.signal)
+          assertCurrent()
+          uploaded.set(source, url)
+        } catch (error) {
+          options.onAssetProgress?.({ source, status: 'failed' })
+          throw error
+        }
       }
+      options.onAssetProgress?.({ source, status: 'uploaded' })
       image.setAttribute('src', uploaded.get(source))
     } else if (!uploadedUrl(windowObject, source)) {
       throw new Error('腾讯云市场：图片缺少有效地址，原文未改动')
     }
+    index++
   }
   return content.innerHTML
 }

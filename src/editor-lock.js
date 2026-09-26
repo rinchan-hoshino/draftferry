@@ -19,11 +19,15 @@ export async function withEditorLock(elements, operation, options = {}) {
   }
   const pageWindow = options.pageWindow ?? targets[0]?.ownerDocument.defaultView
   const initialUrl = pageWindow?.location.href
-  const assertCurrent = () => {
-    if (options.signal?.aborted || pageWindow?.location.href !== initialUrl
+  const assertTargetCurrent = () => {
+    if (pageWindow?.location.href !== initialUrl
       || targets.some((element) => !element.isConnected)) {
       throw new Error('页面或编辑器已切换，已停止导入；请在目标页面重新选择文件')
     }
+  }
+  const assertCurrent = () => {
+    assertTargetCurrent()
+    if (options.signal?.aborted) throw new DOMException('已停止导入', 'AbortError')
   }
   assertCurrent()
   const windows = new Set(targets.map((element) => element.ownerDocument.defaultView))
@@ -62,7 +66,7 @@ export async function withEditorLock(elements, operation, options = {}) {
     }
   }
   try {
-    return await operation(assertCurrent)
+    return await operation(assertCurrent, assertTargetCurrent)
   } finally {
     for (const windowObject of windows) {
       for (const type of blockedEvents) windowObject.removeEventListener(type, block, true)

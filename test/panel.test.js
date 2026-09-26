@@ -21,7 +21,7 @@ test('紧凑入口不修改页面、焦点或选区', () => {
   window.close()
 })
 
-test('进度和错误就地显示，不弹窗或抢焦点，忙碌期间阻止重复操作', () => {
+test('进度可收起和重开，不抢焦点，忙碌期间禁止新稿件', () => {
   const { window } = new JSDOM('<textarea>继续处理其他工作</textarea>')
   const input = window.document.querySelector('textarea')
   input.focus()
@@ -29,9 +29,13 @@ test('进度和错误就地显示，不弹窗或抢焦点，忙碌期间阻止�
   const panel = createPanel(window.document, '知乎')
   window.document.body.append(panel.host)
   panel.setStatus('正在准备图片…', 'busy')
-  assert.equal(panel.button.disabled, true)
+  assert.equal(panel.host.shadowRoot.querySelector('[data-action="new"]').disabled, true)
   assert.equal(panel.diagnoseButton.disabled, true)
   assert.equal(window.document.activeElement, input)
+  panel.collapse()
+  assert.equal(panel.host.shadowRoot.querySelector('.feedback').hidden, true)
+  panel.button.click()
+  assert.equal(panel.host.shadowRoot.querySelector('.feedback').hidden, false)
   panel.setStatus('图片未上传完成，请稍后重试。', 'error')
   assert.equal(panel.button.disabled, false)
   assert.equal(panel.host.shadowRoot.querySelector('[role="status"]').textContent, '图片未上传完成，请稍后重试。')
