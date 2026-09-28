@@ -4,22 +4,22 @@ import { confirmPotentialOverwrite, hasMeaningfulEditorContent } from '../editor
 // Article presentation belongs to this adapter: portable drafts and the other
 // platforms keep semantic HTML and their own typography.
 const ARTICLE_STYLES = {
-  p: 'margin: 0 0 20px; font-size: 16px; line-height: 1.8; color: #353b39;',
-  blockquote: 'margin: 22px 0; padding: 14px 18px; border-left: 3px solid #bfd4d0; background: #f2f7f5; color: #556760; line-height: 1.8;',
-  'ul,ol': 'margin: 0 0 20px; padding-left: 1.8em; font-size: 16px; line-height: 1.8; color: #353b39;',
+  p: 'margin: 0 0 20px; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
+  blockquote: 'margin: 22px 0; padding: 14px 18px; border-left: 4px solid #d9d9d9; background: #f7f7f7; color: #555; line-height: 1.8;',
+  'ul,ol': 'margin: 0 0 20px; padding-left: 1.8em; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
   li: 'margin: 6px 0;',
-  table: 'width: 100%; margin: 22px 0; border-collapse: collapse; table-layout: fixed; font-size: 14px; line-height: 1.65; color: #353b39;',
-  th: 'padding: 10px 12px; border: 1px solid #dce6e2; background: #eef4f1; font-weight: 700; text-align: left; word-break: break-word;',
-  td: 'padding: 10px 12px; border: 1px solid #dce6e2; text-align: left; word-break: break-word;',
-  pre: 'margin: 22px 0; padding: 16px; border: 1px solid #e1e8e4; border-radius: 5px; background: #f5f7f5; line-height: 1.65; white-space: pre-wrap; word-break: break-word;',
-  code: 'padding: 2px 4px; border-radius: 3px; background: #eef4f1; color: #2f6f6b; font-family: Consolas, Monaco, monospace; font-size: 0.9em;',
-  'pre code': 'padding: 0; background: transparent; color: #3f514a; font-family: Consolas, Monaco, monospace; font-size: 14px;',
+  table: 'width: 100%; margin: 22px 0; border-collapse: collapse; table-layout: fixed; font-size: 14px; line-height: 1.65; color: #2b2b2b;',
+  th: 'padding: 10px 12px; border: 1px solid #cfcfcf; background: #f2f2f2; font-weight: 700; text-align: left; word-break: break-word;',
+  td: 'padding: 10px 12px; border: 1px solid #cfcfcf; text-align: left; word-break: break-word;',
+  pre: 'margin: 22px 0; padding: 16px; border: 1px solid #dedede; border-radius: 5px; background: #f5f5f5; line-height: 1.65; white-space: pre-wrap; word-break: break-word;',
+  code: 'padding: 2px 4px; border-radius: 3px; background: #f2f2f2; color: #c7254e; font-family: Consolas, Monaco, monospace; font-size: 0.9em;',
+  'pre code': 'padding: 0; background: transparent; color: #333; font-family: Consolas, Monaco, monospace; font-size: 14px;',
   img: 'display: block; max-width: 100%; height: auto; margin: 22px auto;',
-  hr: 'margin: 30px 0; border: 0; border-top: 1px solid #dce6e2;',
-  a: 'color: #2f6f6b; text-decoration: underline; word-break: break-word;',
+  hr: 'margin: 30px 0; border: 0; border-top: 1px solid #dedede;',
+  a: 'color: #1677b3; text-decoration: underline; word-break: break-word;',
   strong: 'font-weight: 700;',
-  'blockquote p': 'margin: 0 0 12px; font-size: 16px; line-height: 1.8; color: #556760;',
-  'li p': 'margin: 8px 0; font-size: 16px; line-height: 1.8; color: #353b39;',
+  'blockquote p': 'margin: 0 0 12px; font-size: 16px; line-height: 1.8; color: #555;',
+  'li p': 'margin: 8px 0; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
 }
 
 function prepareWechatHtml(document, html) {
@@ -28,14 +28,14 @@ function prepareWechatHtml(document, html) {
   // hierarchy in inline formatting as well as the article's block styles.
   const headingSizes = [24, 22, 19, 17, 16, 16]
   for (const heading of container.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
-    heading.style.cssText = 'font-weight: 700; line-height: 1.5; color: #24302d;'
+    heading.style.cssText = 'font-weight: 700; line-height: 1.5; color: #202020;'
     const level = Number(heading.tagName[1])
     const size = `${headingSizes[level - 1]}px`
     heading.style.fontSize = size
     heading.style.margin = `${level <= 2 ? 32 : level === 3 ? 26 : 22}px 0 ${level <= 2 ? 16 : 12}px`
     if (level <= 2) {
-      heading.style.borderLeft = '3px solid #2f6f6b'
-      heading.style.paddingLeft = '12px'
+      heading.style.borderLeft = '4px solid #d8a522'
+      heading.style.paddingLeft = '10px'
     }
     const span = document.createElement('span')
     span.style.fontSize = size

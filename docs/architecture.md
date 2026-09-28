@@ -25,7 +25,7 @@
 
 - 搜狐继续使用已经在真实页面确认的 Observer-backed Vue `_data.quill` 路线，并校验 Quill root。保持 0.4.16 的表格空白清理和 Mermaid 块级包裹；不得重新加入已经失败的 synthetic paste、execCommand 或直接 DOM fallback。
 - 搜狐 202609181124 的[官方编辑器脚本](https://g1.itc.cn/bsf-mp-prod/mp_micro_contentmanager/202609181124/dist/js/app.21765eb02e.js)明确将 H3–H6 粘贴为普通段落。因此仅在搜狐适配层把无 H1 正文中的 H2/H3 映射到 H1/H2，更深标题变为加粗段落。通用稿件与便携 Markdown 不受影响，不改平台 matcher 或全局注册表。
-- 微信适配层单独添加墨青正文主题，并为标题保留行内字号与 strong，防止平台重置标题样式或规范化块级标签后丢失层级。空列表清理先于样式添加，避免空节点因 style 属性被误判为正文。通用稿件及其他平台不受主题影响。诊断下载使用未挂载的链接，绕过宿主页捕获监听；60 秒后回收 Blob URL。
+- 微信适配层单独添加金色标题标记与中性灰排版，并为标题保留行内字号与 strong，防止平台重置标题样式或规范化块级标签后丢失层级。空列表清理先于样式添加，避免空节点因 style 属性被误判为正文。通用稿件及其他平台不受主题影响。诊断下载使用未挂载的链接，绕过宿主页捕获监听；60 秒后回收 Blob URL。
 - 阿里云脚本在 `msp.aliyun.com/*` 加载，以覆盖从控制台其他页面进入编辑页的路径；面板仍严格限定于带 `commodityId` 的产品基础信息编辑页。油猴地址通知采用[官方 `window.onurlchange` 接口](https://www.tampermonkey.net/documentation.php?q=window)，不拦截平台导航。
 - 阿里云 iframe 编辑器的 [`setData` 会重建正文 DOM](https://ckeditor.com/docs/ckeditor4/latest/api/CKEDITOR_editor.html#event-contentDom)，使锁定的旧正文失效。正常导入使用原生 `createRange` / `selectRanges` 选中完整正文再触发粘贴，保留平台图片上传管线和当前编辑节点；仅失败恢复时使用 `setData`。发布回归使用真实 CKEditor 4.22.1，上传请求由本地测试响应，不访问阿里云服务。
 - 腾讯的真实账号页尚未验证 0.6.2。2026-09-28 的 0.6.1 反馈仍显示接口候选为空且扫描被截断；真实 React 与 wangEditor 3.1.1 复现同一诊断形态，原因是旧判断要求 3.x 不具备的 `destroy`。回归覆盖 3.x/4.x、自定义组件字段、state/memo 引用和外层长父链；无法取得唯一且关联正确的接口时直接报错，不能退回全局粘贴。
