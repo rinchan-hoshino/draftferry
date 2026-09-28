@@ -122,6 +122,41 @@ test('腾讯仅接受唯一且根元素匹配的 legacy wangEditor，诊断不�
   window.close()
 })
 
+test('腾讯从 React 组件自己的编辑器引用导入，不因外层页面图被截断而拒绝已匹配接口', async () => {
+  const { window, element, native } = fixture()
+  let outer = { return: null }
+  for (let depth = 0; depth < 40; depth++) outer = { return: outer }
+  element.__reactFiber$test = {
+    return: { stateNode: { richTextInstance: native }, return: outer },
+  }
+  let getterReads = 0
+  Object.defineProperty(element.__reactFiber$test.return.stateNode, 'privateData', {
+    get() { getterReads++; throw new Error('不得调用组件 getter') },
+  })
+  assert.equal(findLegacyWangEditor(element), native)
+  const report = collectFrameworkInstances(element)
+  assert.equal(report.truncated, true)
+  assert.equal(report.candidates[0].relation, 'wang-editor-root')
+  assert.doesNotMatch(JSON.stringify(report), /richTextInstance|privateData|原正文/)
+  await injectPlatformArticle(window.document, article)
+  assert.equal(element.textContent, '新正文前后单元格')
+  assert.equal(getterReads, 0)
+  window.close()
+})
+
+test('腾讯识别 React state 和 memo 数组中的实例，并拒绝另一编辑器及重复根接口', () => {
+  const { window, element, native } = fixture()
+  const wrong = { ...native, $textElem: { elems: [window.document.createElement('div')] } }
+  element.__reactFiber$test = {
+    stateNode: { state: { detail: wrong } },
+    memoizedState: { memoizedState: [native, []], next: null },
+  }
+  assert.equal(findLegacyWangEditor(element), native)
+  element.__reactFiber$test.stateNode.state.detail = { ...native }
+  assert.equal(findLegacyWangEditor(element), null)
+  window.close()
+})
+
 test('腾讯原文恢复失败时不会错误提示恢复成功', async () => {
   const { window, element, native } = fixture()
   native.txt.html = (value) => {

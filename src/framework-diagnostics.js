@@ -29,6 +29,15 @@ const FRAMEWORK_GRAPH_EDGES = [
   'value',
 ]
 
+// Follow references owned by the associated component, including application-
+// named instance fields and React memo tuples. Never walk into sibling/child
+// component trees, alternate renders, constructors, or framework back-pointers.
+const EXCLUDED_GRAPH_EDGES = new Set([
+  'child', 'children', 'sibling', 'alternate',
+  'constructor', 'prototype', '__proto__',
+  '_reactInternals', '_reactInternalFiber', '__reactInternalMemoizedMaskedChildContext',
+])
+
 function frameworkOwnerKind(name) {
   if (name === '__vue__') return OWNER_KINDS.vue2
   if (name === '__vueParentComponent') return OWNER_KINDS.vue3
@@ -122,9 +131,15 @@ function isTraversable(value, targetWindow) {
   return true
 }
 
-function traversableEdgeValues(value, targetWindow) {
+function traversableEdgeValues(value, targetWindow, budget) {
   const values = []
-  for (const name of FRAMEWORK_GRAPH_EDGES) {
+  let names
+  try { names = Object.getOwnPropertyNames(value) } catch { return values }
+  if (names.length > 200) budget.truncated = true
+  // Known owner/state paths go first; private scalar values and accessors are
+  // neither followed nor included in diagnostics.
+  for (const name of new Set([...FRAMEWORK_GRAPH_EDGES, ...names.slice(0, 200)])) {
+    if (EXCLUDED_GRAPH_EDGES.has(name)) continue
     let descriptor
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, name)
@@ -165,7 +180,7 @@ function scanOwnerReference(reference, context) {
       context.onCandidate?.(current.value, kind, candidateRelation(current.value, context.target, kind))
     }
     if (kind) continue
-    const edgeValues = traversableEdgeValues(current.value, context.targetWindow)
+    const edgeValues = traversableEdgeValues(current.value, context.targetWindow, context.budget)
     if (current.depth >= context.maxDepth) {
       if (edgeValues.some((value) => !context.objectSeen.has(value))) {
         context.budget.truncated = true
@@ -242,8 +257,10 @@ export function collectFrameworkInstances(target, options = {}) {
 
 export function findLegacyWangEditor(target) {
   const instances = []
-  const scan = scanFrameworkInstances(target, {}, (instance, kind, relation) => {
+  scanFrameworkInstances(target, {}, (instance, kind, relation) => {
     if (kind === 'wang-editor-legacy' && relation === 'wang-editor-root') instances.push(instance)
   })
-  return !scan.truncated && instances.length === 1 ? instances[0] : null
+  // Truncation describes the surrounding framework graph, not this API's
+  // identity. Exact DOM-root equality is required even when that graph is large.
+  return instances.length === 1 ? instances[0] : null
 }

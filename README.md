@@ -1,6 +1,6 @@
 # 稿渡（DraftFerry）
 
-稿渡将 Markdown、本地图片和 Mermaid 图表填入八个内容平台。当前版本 **0.6.0 Preview**，选择文件后立即导入，正文沿用目标平台的原生排版，完成后由使用者检查并手动保存或发布。
+稿渡将 Markdown、本地图片和 Mermaid 图表填入八个内容平台。当前版本 **0.6.1 Preview**，选择文件后立即导入，正文沿用目标平台的原生排版，完成后由使用者检查并手动保存或发布。
 
 [安装或更新稿渡](https://acv.k-neco.com/tools/draftferry.user.js) · [本版变化](CHANGELOG.md)
 

@@ -71,6 +71,35 @@ async function check(name, run) {
 }
 
 try {
+  await check('production-shaped React owner references with long outer ancestry', async page => {
+    await page.evaluate(() => {
+      const w = globalThis
+      let outer = { return: null }
+      for (let depth = 0; depth < 40; depth++) outer = { return: outer }
+      w.document.querySelector('#target').__reactFiber$fixture = {
+        stateNode: { state: { productDetails: w.native, customerCase: w.otherEditor } },
+        return: outer,
+      }
+    })
+    await page.addScriptTag({ path: resolve('dist/draftferry.user.js') })
+    const panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles([
+      { name: 'product.md', mimeType: 'text/markdown', buffer: Buffer.from('# 商品\n\n修复后的正文![图](one.png)\n\n| 参数 | 值 |\n| --- | --- |\n| 大小 | 一 |') },
+      { name: 'one.png', mimeType: 'image/png', buffer: png },
+    ])
+    await page.waitForFunction(() => globalThis.uploadCallbacks.length === 1)
+    await page.locator('#other').fill('上传时继续填写')
+    await page.evaluate(() => globalThis.uploadCallbacks[0]('https://images.example.test/repaired.png'))
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'done')
+    await page.waitForFunction(() => globalThis.savedHtml?.includes('修复后的正文'))
+    assert.match(await page.locator('#target .w-e-text').innerText(), /修复后的正文/)
+    assert.equal(await page.locator('#target .w-e-text img').getAttribute('src'), 'https://images.example.test/repaired.png')
+    assert.equal(await page.locator('#target .w-e-text td').count(), 2)
+    assert.equal(await page.locator('#other-editor .w-e-text').innerText(), '其他编辑器原文')
+    assert.equal(await page.locator('#other').inputValue(), '上传时继续填写')
+    assert.equal(await page.locator('#target .w-e-text').getAttribute('contenteditable'), 'true')
+  })
+
   await check('native replacement, scoped lock, focus and framework onchange', async (page) => {
     await page.evaluate(() => {
       globalThis.otherEditor.selection.restoreSelection()
