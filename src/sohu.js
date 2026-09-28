@@ -137,6 +137,22 @@ function getSohuQuill(editor) {
 function prepareSohuHtml(document, html) {
   const container = document.createElement('div')
   container.innerHTML = html
+  // Sohu's clipboard explicitly flattens H3–H6. The article H1 is normally
+  // extracted as the title, so map body H2/H3 to its native H1/H2. If the body
+  // still has H1, preserve that hierarchy. Deeper headings remain bold text.
+  const offset = container.querySelector('h1') ? 0 : 1
+  for (const heading of container.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+    const level = Number(heading.tagName[1]) - offset
+    const replacement = document.createElement(level <= 2 ? `h${level}` : 'p')
+    if (level <= 2) {
+      replacement.append(...heading.childNodes)
+    } else {
+      const strong = document.createElement('strong')
+      strong.append(...heading.childNodes)
+      replacement.append(strong)
+    }
+    heading.replaceWith(replacement)
+  }
   for (const table of container.querySelectorAll('table')) {
     table.setAttribute('cellspacing', '0')
     table.style.setProperty('border-collapse', 'collapse', 'important')

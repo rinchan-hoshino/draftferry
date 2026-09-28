@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { JSDOM } from 'jsdom'
+import { createDraft, renderDraft } from '../src/draft.js'
 
 import {
   PLATFORM_IDS,
@@ -505,6 +506,30 @@ test('微信公众号只使用正文 ProseMirror 和编辑器 JSAPI', async () =
   assert.equal(page.window.document.querySelector('#title').value, article.title)
   assert.equal(body.querySelectorAll('img').length, 1)
   assert.equal(page.window.document.querySelector('.title-editor__input .ProseMirror').textContent, '')
+})
+
+test('微信公众号在原生标题样式被重置时仍保留 Markdown 层级、加粗与行内内容', async () => {
+  const page = dom(`
+    <textarea id="title"></textarea><div class="ProseMirror"><p><br></p></div>
+    <style>h1,h2,h3,h4,h5,h6 { font-size:16px; font-weight:normal }</style>
+  `, 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2')
+  const source = '# 文章标题\n\n## 业务 **背景**\n\n### [同步说明](https://example.com)\n\n#### 子步骤\n\n普通正文\n\n```md\n## 代码里的标题\n```'
+  const draft = renderDraft(createDraft(source, { windowObject: page.window }))
+  let html
+  page.window.__MP_Editor_JSAPI__ = { invoke({ apiParam, sucCb }) { html = apiParam.content; sucCb() } }
+  await injectPlatformArticle(page.window.document, draft)
+  const body = page.window.document.querySelector('.ProseMirror')
+  body.innerHTML = html
+  const headings = [...body.querySelectorAll('h2,h3,h4')]
+  assert.equal(headings.length, 3)
+  const sizes = headings.map(heading => parseFloat(heading.querySelector('span').style.fontSize))
+  assert.ok(sizes[0] > sizes[1] && sizes[1] > sizes[2] && sizes[2] > 16)
+  for (const heading of headings) assert.equal(heading.querySelector('strong').textContent, heading.textContent)
+  assert.equal(headings[1].querySelector('a').href, 'https://example.com/')
+  assert.equal(body.querySelector('pre').textContent.trim(), '## 代码里的标题')
+  assert.equal(page.window.document.querySelector('#title').value, '文章标题')
+  assert.doesNotMatch(html, /border|background|color:/)
+  assert.doesNotMatch(draft.html, /style=/, '通用稿件保持原生语义')
 })
 
 test('微信公众号导入前清理有序列表中的空编号', async () => {

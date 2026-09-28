@@ -56,13 +56,16 @@ export function downloadDiagnosticFile({
   const link = document.createElement('a')
   link.href = objectUrl
   link.download = filename
-  link.hidden = true
-  ;(document.body ?? document.documentElement).append(link)
   try {
+    // A detached anchor still downloads in Chrome, without bubbling through the
+    // host page's delegated link handlers (which can navigate to the blob URL).
     link.click()
-  } finally {
-    link.remove()
+  } catch (error) {
     windowObject.URL.revokeObjectURL(objectUrl)
+    throw error
   }
+  // Let the browser acquire the blob before releasing it. Revoking in the same
+  // click task can invalidate an asynchronous download.
+  windowObject.setTimeout(() => windowObject.URL.revokeObjectURL(objectUrl), 60_000)
   return filename
 }

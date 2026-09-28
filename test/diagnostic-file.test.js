@@ -81,6 +81,9 @@ test('下载诊断生成固定安全文件名和 text/plain Blob', () => {
   let createdBlob = null
   let revokedUrl = null
   let clicked = null
+  let cleanup = null
+  let cleanupDelay = null
+  dom.window.setTimeout = (callback, delay) => { cleanup = callback; cleanupDelay = delay }
   dom.window.Blob = class {
     constructor(parts, options) {
       this.parts = parts
@@ -91,6 +94,7 @@ test('下载诊断生成固定安全文件名和 text/plain Blob', () => {
   dom.window.URL.createObjectURL = () => 'blob:diagnostic'
   dom.window.URL.revokeObjectURL = (url) => { revokedUrl = url }
   dom.window.HTMLAnchorElement.prototype.click = function click() {
+    assert.equal(this.isConnected, false, '下载不能经过宿主页的链接导航监听器')
     clicked = { href: this.href, download: this.download }
   }
 
@@ -110,6 +114,26 @@ test('下载诊断生成固定安全文件名和 text/plain Blob', () => {
     href: 'blob:diagnostic',
     download: filename,
   })
+  assert.equal(revokedUrl, null, '浏览器读取文件前不能撤销 Blob 地址')
+  assert.ok(cleanupDelay >= 30_000)
+  cleanup()
   assert.equal(revokedUrl, 'blob:diagnostic')
   assert.equal(dom.window.document.querySelector('a'), null)
+})
+
+test('诊断下载不触发宿主页捕获阶段的链接路由', () => {
+  const dom = new JSDOM('<body></body>', { url: 'https://mp.weixin.qq.com/cgi-bin/appmsg' })
+  let navigations = 0
+  dom.window.document.addEventListener('click', (event) => {
+    if (event.target.closest('a')) { navigations++; event.preventDefault() }
+  }, true)
+  dom.window.URL.createObjectURL = () => 'blob:diagnostic'
+  dom.window.URL.revokeObjectURL = () => {}
+  dom.window.setTimeout = () => 0
+  dom.window.HTMLAnchorElement.prototype.click = function click() {
+    this.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
+  }
+  downloadDiagnosticFile({ windowObject: dom.window, document: dom.window.document, text: '{}' })
+  assert.equal(navigations, 0)
+  dom.window.close()
 })

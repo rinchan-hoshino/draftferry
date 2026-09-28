@@ -1,0 +1,165 @@
+import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { build } from 'esbuild'
+import { chromium } from 'playwright-core'
+
+const executablePath = process.env.DRAFTFERRY_CHROME_PATH ?? [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+].find(existsSync)
+if (!executablePath) throw new Error('Set DRAFTFERRY_CHROME_PATH to an installed Chrome/Chromium executable')
+const helper = await build({
+  stdin: { contents: `
+    export { createDraft, renderDraft } from './src/draft.js'
+    export { injectPlatformArticle } from './src/platforms.js'
+    export { downloadDiagnosticFile } from './src/diagnostic-file.js'
+  `, resolveDir: process.cwd() },
+  bundle: true, format: 'iife', globalName: 'DraftFerryTest', write: false,
+})
+const browser = await chromium.launch({ executablePath, headless: true })
+let checks = 0
+async function check(name, url, run) {
+  const page = await browser.newPage({ acceptDownloads: true })
+  page.setDefaultTimeout(7000)
+  try {
+    await page.route('**/*', route => route.abort())
+    await page.route(url, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>' }))
+    await page.goto(url)
+    await page.addScriptTag({ content: helper.outputFiles[0].text })
+    await run(page)
+    checks++
+    console.log(`PASS ${name}`)
+  } finally { await page.close() }
+}
+
+try {
+  await check('搜狐真实 Quill 保留两级标题、深层加粗及代码字面量', 'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle', async page => {
+    // The optional snapshot runs the same check against Sohu's downloaded
+    // production Quill. Normal check remains offline with the pinned version.
+    const snapshot = process.env.DRAFTFERRY_SOHU_SNAPSHOT
+    if (snapshot) {
+      for (const name of ['sohu-content-chunk-libs.21765eb02e.js', 'sohu-editor-only.js']) {
+        await page.addScriptTag({ path: resolve(snapshot, name) })
+      }
+    } else {
+      await page.addScriptTag({ path: resolve('node_modules/quill/dist/quill.js') })
+    }
+    const result = await page.evaluate(async () => {
+      const window = globalThis
+      const { document } = window
+      document.body.innerHTML = '<input id="other" value="继续编辑"><input placeholder="请输入标题"><div id="editor"></div><div id="other-editor"></div>'
+      globalThis.confirm = () => true
+      const Quill = globalThis.SohuQuill ?? globalThis.Quill
+      const quill = new Quill('#editor', { theme: 'snow' })
+      const otherQuill = new Quill('#other-editor', { theme: 'snow' })
+      otherQuill.setText('另一个编辑器原文')
+      const Delta = Quill.import('delta')
+      // Current Sohu source (202609181124): clipboard matchers flatten H3–H6.
+      // https://g1.itc.cn/bsf-mp-prod/mp_micro_contentmanager/202609181124/dist/js/app.21765eb02e.js
+      for (const tag of ['H3', 'H4', 'H5', 'H6']) {
+        quill.clipboard.addMatcher(tag, (node, delta) => {
+          const attributes = delta?.ops?.[0]?.attributes
+          if (attributes) delete attributes.header
+          return new Delta().insert(`${node.innerText}\n`, attributes)
+        })
+      }
+      const data = {}
+      Object.defineProperty(data, '__ob__', { value: {} })
+      Object.defineProperty(data, 'quill', { get: () => quill, set() {} })
+      document.querySelector('#editor').__vue__ = { _data: data }
+      // A same-size second editor should not be selected or overwritten.
+      otherQuill.root.parentElement.hidden = true
+      const other = document.querySelector('#other')
+      other.focus()
+      other.setSelectionRange(1, 3)
+      const api = globalThis.DraftFerryTest
+      const article = api.renderDraft(api.createDraft('# 文章\n\n## 业务背景\n\n正文\n\n### 同步说明\n\n#### 小步骤\n\n##### 细节\n\n###### 末级\n\n```md\n## 代码字面量\n```', { windowObject: window }))
+      // Prove this fixture reproduces the platform loss before exercising import.
+      const before = quill.clipboard.convert({ html: article.html })
+      await api.injectPlatformArticle(document, article)
+      return {
+        version: Quill.version, beforeHeaders: before.ops.filter(op => op.attributes?.header).map(op => op.attributes.header),
+        headings: [...quill.root.querySelectorAll('h1,h2')].map(node => [node.tagName, node.textContent]),
+        deeper: [...quill.root.querySelectorAll('p > strong')].map(node => node.textContent),
+        text: quill.getText(), title: document.querySelector('input[placeholder]').value,
+        otherText: otherQuill.getText(), focus: document.activeElement.id, selection: [other.selectionStart, other.selectionEnd],
+      }
+    })
+    assert.equal(result.version, '2.0.3')
+    assert.deepEqual(result.beforeHeaders, [2])
+    assert.deepEqual(result.headings, [['H1', '业务背景'], ['H2', '同步说明']])
+    assert.deepEqual(result.deeper, ['小步骤', '细节', '末级'])
+    assert.match(result.text, /## 代码字面量/)
+    assert.equal(result.title, '文章')
+    assert.equal(result.otherText.trim(), '另一个编辑器原文')
+    assert.equal(result.focus, 'other')
+    assert.deepEqual(result.selection, [1, 3])
+  })
+
+  await check('微信诊断下载不触发页面导航且文件字节完整', 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2', async page => {
+    await page.evaluate(() => {
+      const window = globalThis
+      const { document, location } = window
+      globalThis.hijacked = 0
+      document.addEventListener('click', event => {
+        const link = event.target.closest('a')
+        if (!link) return
+        globalThis.hijacked++
+        event.preventDefault()
+        location.href = link.href
+      }, true)
+      const button = document.createElement('button')
+      button.textContent = '下载诊断'
+      button.onclick = () => globalThis.DraftFerryTest.downloadDiagnosticFile({
+        windowObject: window, document, text: JSON.stringify({ message: '完整诊断', sample: 'x'.repeat(500_000) }),
+        platformId: 'wechat', version: 'test', now: new Date('2026-09-28T08:00:00Z'),
+      })
+      document.body.append(button)
+    })
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button').click()])
+    assert.equal(await download.failure(), null)
+    assert.equal(download.suggestedFilename(), 'draftferry-diagnostic-wechat-test-20260928-080000.txt')
+    const content = JSON.parse(await readFile(await download.path(), 'utf8'))
+    assert.equal(content.message, '完整诊断')
+    assert.equal(content.sample.length, 500_000)
+    assert.equal(await page.evaluate(() => globalThis.hijacked), 0)
+    assert.match(page.url(), /appmsg\?t=/)
+    assert.equal(await page.locator('a').count(), 0)
+  })
+
+  await check('微信标题经过块级规范化后仍有层级与加粗', 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2', async page => {
+    const result = await page.evaluate(async () => {
+      const window = globalThis
+      const { document } = window
+      document.body.innerHTML = '<style>body{font-size:16px}h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:normal}</style><textarea id="title"></textarea><div class="ProseMirror"></div>'
+      globalThis.__MP_Editor_JSAPI__ = { invoke({ apiParam, sucCb }) {
+        const body = document.querySelector('.ProseMirror')
+        body.innerHTML = apiParam.content
+        // Model the host normalizing block tags while retaining inline formats.
+        for (const heading of body.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+          const paragraph = document.createElement('p')
+          paragraph.append(...heading.childNodes)
+          heading.replaceWith(paragraph)
+        }
+        sucCb()
+      } }
+      const api = globalThis.DraftFerryTest
+      const article = api.renderDraft(api.createDraft('# 文章\n\n## 业务背景\n\n### 同步说明\n\n#### 小步骤\n\n普通正文\n\n```md\n## 代码字面量\n```', { windowObject: window }))
+      await api.injectPlatformArticle(document, article)
+      const body = document.querySelector('.ProseMirror')
+      return {
+        sizes: [...body.querySelectorAll('span')].map(span => parseFloat(window.getComputedStyle(span).fontSize)),
+        weights: [...body.querySelectorAll('strong')].map(strong => Number(window.getComputedStyle(strong).fontWeight)),
+        title: document.querySelector('#title').value, code: body.querySelector('pre').textContent.trim(),
+      }
+    })
+    assert.equal(result.title, '文章')
+    assert.equal(result.code, '## 代码字面量')
+    assert.equal(result.sizes.length, 3)
+    assert.ok(result.sizes[0] > result.sizes[1] && result.sizes[1] > result.sizes[2] && result.sizes[2] > 16)
+    assert.ok(result.weights.every(weight => weight >= 700))
+  })
+} finally { await browser.close() }
+console.log(`Platform browser verification: ${checks} scenarios passed`)

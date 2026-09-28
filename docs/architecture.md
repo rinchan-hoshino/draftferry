@@ -24,6 +24,8 @@
 ## 已验证的兼容边界
 
 - 搜狐继续使用已经在真实页面确认的 Observer-backed Vue `_data.quill` 路线，并校验 Quill root。保持 0.4.16 的表格空白清理和 Mermaid 块级包裹；不得重新加入已经失败的 synthetic paste、execCommand 或直接 DOM fallback。
+- 搜狐 202609181124 的[官方编辑器脚本](https://g1.itc.cn/bsf-mp-prod/mp_micro_contentmanager/202609181124/dist/js/app.21765eb02e.js)明确将 H3–H6 粘贴为普通段落。因此仅在搜狐适配层把无 H1 正文中的 H2/H3 映射到 H1/H2，更深标题变为加粗段落。通用稿件与便携 Markdown 不受影响，不改平台 matcher 或全局注册表。
+- 微信适配层为标题保留行内字号与 strong，防止平台重置标题样式或规范化块级标签后丢失层级；不添加色彩或装饰。诊断下载使用未挂载的链接，绕过宿主页捕获监听；60 秒后回收 Blob URL。
 - 腾讯的真实账号页尚未验证 0.6.2。2026-09-28 的 0.6.1 反馈仍显示接口候选为空且扫描被截断；真实 React 与 wangEditor 3.1.1 复现同一诊断形态，原因是旧判断要求 3.x 不具备的 `destroy`。回归覆盖 3.x/4.x、自定义组件字段、state/memo 引用和外层长父链；无法取得唯一且关联正确的接口时直接报错，不能退回全局粘贴。
 - 腾讯、知乎的上传由稿渡逐项管理；其他平台交给原生编辑器上传，是否逐项复用由平台决定。所有平台都保留稿件与本地素材，不要求失败后重选整篇文件。
 - 测试不会调用真实平台上传服务。Chrome 测试分别运行真正的 wangEditor 3.1.1 和 4.7.15，用受控上传回调与 HTTP 响应验证行为；它不等同于腾讯线上接口验收。
@@ -35,6 +37,6 @@ npm ci
 npm run check
 ```
 
-`check` 包含 ESLint、Node 单元/页面夹具、构建与元数据检查、面板挂载和独立 Chrome 浏览器验证。需要本机安装 Chrome/Chromium；可通过 `DRAFTFERRY_CHROME_PATH` 指定可执行文件。浏览器使用临时用户目录，不接管日常浏览器；两版 wangEditor（3.x 使用 npm 别名固定版本）和 Playwright 仅为开发依赖，不进入用户脚本。
+`check` 包含 ESLint、Node 单元/页面夹具、构建与元数据检查、面板挂载和独立 Chrome 浏览器验证。需要本机安装 Chrome/Chromium；可通过 `DRAFTFERRY_CHROME_PATH` 指定可执行文件。浏览器使用临时用户目录，不接管日常浏览器；两版 wangEditor（3.x 使用 npm 别名固定版本）、Quill 2.0.3 和 Playwright 仅为开发依赖，不进入用户脚本。平台浏览器检查包含下载字节与导航、微信标题块级规范化、带搜狐真实降级规则的 Quill。
 
 发布前提高 package 与 lockfile 的版本，运行完整检查并保存源代码提交。发布仅替换既有 `tools/draftferry.user.js`，在站点目录外备份旧文件；通过原 URL 获取完整文件核对版本和 SHA-256。不要把本地构建成功当作发布成功。

@@ -62,7 +62,7 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
     assert.equal(panel.shadowRoot.querySelector('[data-rin-action="sohu-preflight"]'), null)
     panel.shadowRoot.querySelector('[data-rin-action="diagnose"]').click()
     assert.match(downloadedFilename, /^draftferry-diagnostic-zhihu-test-version-/)
-    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /诊断已下载/)
+    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /已开始下载诊断/)
 
     const fileInput = panel.shadowRoot.querySelector('[data-rin-files]')
     assert.equal(fileInput.style.getPropertyValue('display'), 'none')
@@ -110,7 +110,7 @@ test('搜狐页面单击下载诊断即可取得全页结构和实例分层结�
     assert.match(downloadedFilename, /^draftferry-diagnostic-sohu-test-version-/)
     assert.equal(result.safeDomMap.elementCount > 0, true)
     assert.equal(result.sohuEditorPreflight.result, 'slot-missing')
-    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /诊断已下载/)
+    assert.match(panel.shadowRoot.querySelector('[data-rin-status]').textContent, /已开始下载诊断/)
   })
 })
 

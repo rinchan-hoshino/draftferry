@@ -56,7 +56,7 @@ function diagnose() {
     const runtimeDocument = pageWindow.document ?? pageDocument
     const text = buildDiagnosticFile({ document: runtimeDocument, pageWindow, platformId: platform.id, version: __DRAFTFERRY_VERSION__ })
     const filename = downloadDiagnosticFile({ windowObject: pageWindow, document: runtimeDocument, text, platformId: platform.id, version: __DRAFTFERRY_VERSION__ })
-    panel.setStatus(`诊断已下载：${filename}`)
+    panel.setStatus(`已开始下载诊断：${filename}`)
   } catch (error) { panel.setStatus(error.message || String(error), 'error') }
 }
 

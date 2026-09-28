@@ -3,6 +3,17 @@ import { confirmPotentialOverwrite, hasMeaningfulEditorContent } from '../editor
 
 function prepareWechatHtml(document, html) {
   const container = parseHtml(document, html)
+  // WeChat resets heading styles and may normalize the block tag. Carry the
+  // hierarchy in supported inline formatting without adding decorative styles.
+  const headingSizes = [24, 22, 19, 17, 16, 16]
+  for (const heading of container.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+    const span = document.createElement('span')
+    span.style.fontSize = `${headingSizes[Number(heading.tagName[1]) - 1]}px`
+    const strong = document.createElement('strong')
+    strong.append(...heading.childNodes)
+    span.append(strong)
+    heading.append(span)
+  }
   for (const item of container.querySelectorAll('li')) {
     if (!hasMeaningfulEditorContent(item)) {
       item.remove()
@@ -89,4 +100,3 @@ export async function injectWechat(document, article, windowObject = document.de
     mode: 'html-api',
   }
 }
-

@@ -250,6 +250,32 @@ test('搜狐通过 Quill 保持完整正文、连续表格与 A-B-C 图片顺序
   assert.equal(editor.textContent.includes('END'), true)
 })
 
+test('搜狐将正文标题映射到原生两级，更深标题保留加粗且不触碰代码', async () => {
+  const { window } = createSohuDom()
+  installFakeQuill(window)
+  await injectSohuArticle(window.document, {
+    title: '稿件',
+    html: '<h2>主节 <em>重点</em></h2><h3><a href="https://example.com">分节</a></h3><h4>小节</h4><h5>细节</h5><h6>末级</h6><pre><code>### 代码</code></pre>',
+  })
+  const editor = window.document.querySelector('.ql-editor')
+  assert.equal(editor.querySelector('h1').textContent, '主节 重点')
+  assert.equal(editor.querySelector('h1 em').textContent, '重点')
+  assert.equal(editor.querySelector('h2 a').href, 'https://example.com/')
+  assert.deepEqual([...editor.querySelectorAll('p > strong')].map(node => node.textContent), ['小节', '细节', '末级'])
+  assert.equal(editor.querySelectorAll('h3,h4,h5,h6').length, 0)
+  assert.equal(editor.querySelector('pre code').textContent, '### 代码')
+})
+
+test('搜狐正文仍有一级标题时保留原始两级关系，不挤占下一级', async () => {
+  const { window } = createSohuDom()
+  installFakeQuill(window)
+  await injectSohuArticle(window.document, { title: '', html: '<h1>一级</h1><h2>二级</h2><h3>三级</h3>' })
+  const editor = window.document.querySelector('.ql-editor')
+  assert.equal(editor.querySelector('h1').textContent, '一级')
+  assert.equal(editor.querySelector('h2').textContent, '二级')
+  assert.equal(editor.querySelector('p strong').textContent, '三级')
+})
+
 test('搜狐忽略隐藏副本并沿可见编辑器的 Vue 父链取得 Quill', async () => {
   const dom = new JSDOM(`
     <input placeholder="请输入标题">
