@@ -122,6 +122,54 @@ test('腾讯仅接受唯一且根元素匹配的 legacy wangEditor，诊断不�
   window.close()
 })
 
+test('腾讯兼容没有 destroy 的 v3 接口，锁住索引式工具栏并通知宿主正文变化', async () => {
+  const { window, element, native } = fixture()
+  delete native.destroy
+  native.$textElem = { 0: element, length: 1 }
+  const toolbar = window.document.createElement('div')
+  element.before(toolbar)
+  native.$toolbarElem = { 0: toolbar, length: 1 }
+  const changes = []
+  native.change = () => changes.push(native.txt.html())
+  native.config.customUploadImg = (_files, insert) => {
+    assert.equal(toolbar.getAttribute('aria-busy'), 'true')
+    insert('https://example.com/v3.png')
+  }
+  assert.equal(findLegacyWangEditor(element), native)
+  await injectPlatformArticle(window.document, article)
+  assert.deepEqual(changes, [element.innerHTML])
+  assert.equal(element.querySelector('img').src, 'https://example.com/v3.png')
+  assert.equal(toolbar.hasAttribute('aria-busy'), false)
+  window.close()
+})
+
+test('腾讯 v3 写入校验失败时只将已恢复的原文通知宿主', async () => {
+  const { window, element, native } = fixture()
+  delete native.destroy
+  const changes = []
+  native.change = () => changes.push(element.innerHTML)
+  let writes = 0
+  native.txt.html = (value) => {
+    if (value !== undefined) element.innerHTML = ++writes === 1 ? '<p>不完整</p>' : value
+    return element.innerHTML
+  }
+  await assert.rejects(injectPlatformArticle(window.document, article), /正文写入不完整/)
+  assert.deepEqual(changes, ['<p>原正文</p>'])
+  window.close()
+})
+
+test('腾讯遵守 v3 上传钩子的 prevent 结果，不发送图片或改动原文', async () => {
+  const { window, element, native } = fixture()
+  delete native.config.customUploadImg
+  native.config.uploadImgServer = 'https://example.com/upload'
+  native.config.uploadImgHooks = { before: () => ({ prevent: true, msg: '平台拒绝上传' }) }
+  window.XMLHttpRequest.prototype.send = () => assert.fail('平台拒绝后不得发送上传请求')
+  await assert.rejects(injectPlatformArticle(window.document, article), /上传失败/)
+  assert.equal(element.innerHTML, '<p>原正文</p>')
+  assert.equal(element.getAttribute('contenteditable'), 'true')
+  window.close()
+})
+
 test('腾讯从 React 组件自己的编辑器引用导入，不因外层页面图被截断而拒绝已匹配接口', async () => {
   const { window, element, native } = fixture()
   let outer = { return: null }

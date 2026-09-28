@@ -177,7 +177,7 @@ function uploadImage(windowObject, nativeEditor, file, index, timeoutMs, signal)
         } catch { fail() }
       }
       const veto = hooks.before?.(request, nativeEditor, [file])
-      if (typeof veto === 'string' || veto === false) { fail(); return }
+      if (typeof veto === 'string' || veto === false || veto?.prevent) { fail(); return }
       request.send(body)
     } catch (error) { finish(error) }
   })
@@ -238,7 +238,7 @@ export async function injectTencentMarket(document, article, options = {}) {
     throw new Error('腾讯云市场：无法确认商品详情的编辑器接口，原文未改动；请从更多菜单下载诊断')
   }
   const windowObject = editor.ownerDocument.defaultView
-  const toolbar = nativeEditor.$toolbarElem?.elems?.[0]
+  const toolbar = nativeEditor.$toolbarElem?.elems?.[0] ?? nativeEditor.$toolbarElem?.[0]
   return withEditorLock([editor, toolbar], async (assertCurrent) => {
     confirmPotentialOverwrite(windowObject, hasMeaningfulEditorContent(editor))
     const previousHtml = editor.innerHTML
@@ -254,6 +254,9 @@ export async function injectTencentMarket(document, article, options = {}) {
           !== contentSignature(editor.ownerDocument, preparedHtml)) {
           throw new Error('腾讯云市场：正文写入不完整，已恢复原文')
         }
+        // v3's txt.html does not notify the host. Use its native, debounced
+        // change hook only after validating the replacement (v4 observes DOM).
+        if (typeof nativeEditor.change === 'function') nativeEditor.change()
       } catch (error) {
         try {
           nativeEditor.txt.html(previousHtml)
@@ -261,6 +264,7 @@ export async function injectTencentMarket(document, article, options = {}) {
             !== contentSignature(editor.ownerDocument, previousHtml)) {
             throw new Error('恢复后的正文与原文不一致', { cause: error })
           }
+          if (typeof nativeEditor.change === 'function') nativeEditor.change()
         } catch (restoreError) {
           throw new AggregateError([error, restoreError], '腾讯云市场：无法恢复原文，请刷新页面且不要保存', { cause: restoreError })
         }

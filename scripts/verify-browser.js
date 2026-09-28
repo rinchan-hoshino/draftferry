@@ -10,6 +10,9 @@ const executablePath = process.env.DRAFTFERRY_CHROME_PATH ?? [
   '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
 ].find(existsSync)
 if (!executablePath) throw new Error('Set DRAFTFERRY_CHROME_PATH to an installed Chrome/Chromium executable')
+const legacy = process.argv.includes('--editor=v3')
+const editorVersion = legacy ? '3.1.1' : '4.7.15'
+const editorScript = legacy ? 'node_modules/wangeditor-v3/release/wangEditor.js' : 'node_modules/wangeditor/dist/wangEditor.js'
 const fixtureUrl = 'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET'
 const helper = await build({
   stdin: { contents: "export { injectPlatformArticle } from './src/platforms.js'", resolveDir: process.cwd() },
@@ -34,16 +37,17 @@ async function check(name, run) {
     await page.route('https://console.cloud.tencent.com/**', route => route.fulfill({ contentType: 'text/html', body: fixture }))
     await page.route('https://images.example.test/**', (route) => route.fulfill({ contentType: 'image/png', body: png }))
     await page.goto(fixtureUrl)
-    await page.addScriptTag({ path: resolve('node_modules/wangeditor/dist/wangEditor.js') })
+    await page.addScriptTag({ path: resolve(editorScript) })
     await page.addScriptTag({ content: helper.outputFiles[0].text })
     await page.evaluate(() => {
       const w = globalThis
       w.confirm = () => true
       w.uploadCallbacks = []
       w.native = new w.wangEditor('#target')
-      w.native.config.onchangeTimeout = 20
-      w.native.config.onchange = (html) => { w.savedHtml = html }
-      w.native.config.customUploadImg = (_files, insert) => w.uploadCallbacks.push(insert)
+      const config = w.native.customConfig ?? w.native.config
+      config.onchangeTimeout = 20
+      config.onchange = (html) => { w.savedHtml = html }
+      config.customUploadImg = (_files, insert) => w.uploadCallbacks.push(insert)
       w.native.create()
       w.native.txt.html('<p>原正文</p>')
       w.otherEditor = new w.wangEditor('#other-editor')
@@ -144,6 +148,8 @@ try {
     await page.waitForFunction(() => globalThis.outcome !== null)
     assert.match(await page.evaluate(() => globalThis.outcome), /上传超时/)
     await page.locator('#target .w-e-text').fill('用户继续编辑')
+    // v3 observes native keyup/click, whereas v4 also observes DOM mutations.
+    await page.locator('#target .w-e-text').press('ArrowRight')
     await page.evaluate(() => globalThis.uploadCallbacks[0]('https://images.example.test/late.png'))
     await page.waitForFunction(() => globalThis.savedHtml?.includes('用户继续编辑'))
     assert.equal(await page.locator('#target .w-e-text').innerText(), '用户继续编辑')
@@ -320,7 +326,7 @@ try {
     assert.notEqual(darkBackground, lightBackground)
     await panel.screenshot({ path: resolve(proof, 'dark.png') })
   })
-  console.log(`Browser verification: ${checks} scenarios passed (real wangEditor 4.7.15; isolated Chrome).`)
+  console.log(`Browser verification: ${checks} scenarios passed (real wangEditor ${editorVersion}; isolated Chrome).`)
 } finally {
   await browser.close()
 }

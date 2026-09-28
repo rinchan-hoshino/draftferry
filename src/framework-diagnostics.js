@@ -79,7 +79,9 @@ function apiKind(object) {
     && isMethod(object, 'clear')
     && isMethod(object, 'dangerouslyInsertHtml')
   ) return 'wang-editor'
-  if (isMethod(object, 'create') && isMethod(object, 'destroy') && isMethod(object, 'initSelection')) {
+  // v3 has no public destroy(), but provides the same txt.html and root API.
+  // Lifecycle methods unrelated to importing must not exclude a valid editor.
+  if (isMethod(object, 'create') && isMethod(object, 'initSelection')) {
     try {
       // These are constructor-owned fields in legacy wangEditor. Like Quill's
       // root, the userscript bridge can expose them without own descriptors.
