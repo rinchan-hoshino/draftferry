@@ -31,7 +31,7 @@ const expectedMatches = [
   'https://baijiahao.baidu.com/*',
   'https://mp.toutiao.com/*',
   'https://mp.sohu.com/*',
-  'https://msp.aliyun.com/msp/commodity/list*',
+  'https://msp.aliyun.com/*',
   'https://console.cloud.tencent.com/serviceprovider/products/createNew*',
 ]
 for (const match of expectedMatches) {
@@ -39,6 +39,7 @@ for (const match of expectedMatches) {
 }
 assert.equal((artifact.match(/^\/\/ @match\s+/gm) ?? []).length, expectedMatches.length)
 assert.match(artifact, /\/\/ @grant\s+unsafeWindow/)
+assert.match(artifact, /\/\/ @grant\s+window\.onurlchange/)
 assert.doesNotMatch(artifact, /\/\/ @require\s+/)
 assert.doesNotMatch(artifact, /\/\/ @connect\s+|<all_urls>/)
 assert.ok(artifactStat.size < 5 * 1024 * 1024, '构建产物超过 5 MiB')

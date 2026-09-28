@@ -187,3 +187,45 @@ test('没有 Navigation API 时可通过 popstate 挂载后台编辑面板', asy
     assert.ok(dom.window.document.querySelector('#rin-draftferry-panel'))
   })
 })
+
+test('阿里云空闲时静默切换地址也能显示和移除面板', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+    url: 'https://msp.aliyun.com/msp/commodity/list',
+    pretendToBeVisual: true,
+  })
+  disableAutomaticMutationCallbacks(dom)
+
+  await withUserscriptGlobals(dom, async () => {
+    await import(`../src/userscript.js?aliyun-idle-test=${Date.now()}`)
+    assert.equal(dom.window.document.querySelector('#rin-draftferry-panel'), null)
+    dom.window.history.pushState({}, '', '/msp/commodity/list/~/publish/basic?commodityId=69735')
+    await new Promise(resolve => dom.window.setTimeout(resolve, 900))
+    assert.ok(dom.window.document.querySelector('#rin-draftferry-panel'))
+
+    dom.window.history.replaceState({}, '', '/msp/commodity/list')
+    await new Promise(resolve => dom.window.setTimeout(resolve, 900))
+    assert.equal(dom.window.document.querySelector('#rin-draftferry-panel'), null)
+  })
+})
+
+test('油猴地址通知和页面恢复均能重新检查阿里云编辑入口', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+    url: 'https://msp.aliyun.com/',
+    pretendToBeVisual: true,
+  })
+  disableAutomaticMutationCallbacks(dom)
+  dom.window.onurlchange = null
+
+  await withUserscriptGlobals(dom, async () => {
+    await import(`../src/userscript.js?aliyun-urlchange-test=${Date.now()}`)
+    assert.equal(dom.window.document.querySelector('#rin-draftferry-panel'), null)
+    dom.window.history.pushState({}, '', '/msp/commodity/list/~/publish/basic?commodityId=69735')
+    dom.window.dispatchEvent(new dom.window.Event('urlchange'))
+    assert.ok(dom.window.document.querySelector('#rin-draftferry-panel'))
+
+    dom.window.dispatchEvent(new dom.window.PageTransitionEvent('pagehide', { persisted: true }))
+    dom.window.history.replaceState({}, '', '/msp/commodity/list')
+    dom.window.dispatchEvent(new dom.window.PageTransitionEvent('pageshow', { persisted: true }))
+    assert.equal(dom.window.document.querySelector('#rin-draftferry-panel'), null)
+  })
+})

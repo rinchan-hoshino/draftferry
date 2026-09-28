@@ -6,7 +6,7 @@
 - 暂停先进入收尾状态，平台操作结束并解锁后才允许开始或继续任务。恢复原文失败必须保持错误提示，不能被“已暂停”覆盖。
 - `mermaid-png.js` 负责延迟渲染、PNG 和有界缓存。
 - `panel.js` 接收任务状态、显示 Shadow DOM 面板并发送操作意图，不调用平台或执行转换。收起状态与任务状态分开，异步进度不抢焦点或自动展开。
-- `userscript.js` 连接文件选择、任务和页面生命周期；只观察 body 直属子节点，并在运行期间短暂检查 SPA 路由，不替换 history、fetch、XHR 或剪贴板。
+- `userscript.js` 连接文件选择、任务和页面生命周期；只观察 body 直属子节点，不替换 history、fetch、XHR 或剪贴板。`page-location.js` 独立处理地址变化，优先监听 Navigation API 与油猴 `urlchange`；两者均不可用时，仅在页面可见期间比较 URL，空闲状态也能发现 SPA 编辑页。隐藏或离开页面会停止计时器，恢复后重新检查地址。
 - `platforms.js` 识别八个平台并绑定具体目标；目标提供上传重试能力、身份比较、提交和正文定位。普通平台位于 `adapters/`，已验证的搜狐和腾讯桥接实现保留独立模块。
 - `editor-lock.js` 管理目标范围内的输入保护和同步写入时的焦点/选区保存。腾讯还临时关闭目标 contenteditable，完成后恢复原属性。
 - `framework-diagnostics.js` 沿有界的 Vue/React 自有数据引用查找实例，包含组件自定义字段、state 和 memo 数组；跳过 getter、子/兄弟组件、旧渲染树和框架反向引用。诊断文件不包含属性名、实例引用或正文。腾讯只接受根元素与目标完全一致的唯一 legacy wangEditor；外层图的截断标记不否定已经取得的精确根关联。
@@ -25,7 +25,9 @@
 
 - 搜狐继续使用已经在真实页面确认的 Observer-backed Vue `_data.quill` 路线，并校验 Quill root。保持 0.4.16 的表格空白清理和 Mermaid 块级包裹；不得重新加入已经失败的 synthetic paste、execCommand 或直接 DOM fallback。
 - 搜狐 202609181124 的[官方编辑器脚本](https://g1.itc.cn/bsf-mp-prod/mp_micro_contentmanager/202609181124/dist/js/app.21765eb02e.js)明确将 H3–H6 粘贴为普通段落。因此仅在搜狐适配层把无 H1 正文中的 H2/H3 映射到 H1/H2，更深标题变为加粗段落。通用稿件与便携 Markdown 不受影响，不改平台 matcher 或全局注册表。
-- 微信适配层为标题保留行内字号与 strong，防止平台重置标题样式或规范化块级标签后丢失层级；不添加色彩或装饰。诊断下载使用未挂载的链接，绕过宿主页捕获监听；60 秒后回收 Blob URL。
+- 微信适配层单独添加墨青正文主题，并为标题保留行内字号与 strong，防止平台重置标题样式或规范化块级标签后丢失层级。空列表清理先于样式添加，避免空节点因 style 属性被误判为正文。通用稿件及其他平台不受主题影响。诊断下载使用未挂载的链接，绕过宿主页捕获监听；60 秒后回收 Blob URL。
+- 阿里云脚本在 `msp.aliyun.com/*` 加载，以覆盖从控制台其他页面进入编辑页的路径；面板仍严格限定于带 `commodityId` 的产品基础信息编辑页。油猴地址通知采用[官方 `window.onurlchange` 接口](https://www.tampermonkey.net/documentation.php?q=window)，不拦截平台导航。
+- 阿里云 iframe 编辑器的 [`setData` 会重建正文 DOM](https://ckeditor.com/docs/ckeditor4/latest/api/CKEDITOR_editor.html#event-contentDom)，使锁定的旧正文失效。正常导入使用原生 `createRange` / `selectRanges` 选中完整正文再触发粘贴，保留平台图片上传管线和当前编辑节点；仅失败恢复时使用 `setData`。发布回归使用真实 CKEditor 4.22.1，上传请求由本地测试响应，不访问阿里云服务。
 - 腾讯的真实账号页尚未验证 0.6.2。2026-09-28 的 0.6.1 反馈仍显示接口候选为空且扫描被截断；真实 React 与 wangEditor 3.1.1 复现同一诊断形态，原因是旧判断要求 3.x 不具备的 `destroy`。回归覆盖 3.x/4.x、自定义组件字段、state/memo 引用和外层长父链；无法取得唯一且关联正确的接口时直接报错，不能退回全局粘贴。
 - 腾讯、知乎的上传由稿渡逐项管理；其他平台交给原生编辑器上传，是否逐项复用由平台决定。所有平台都保留稿件与本地素材，不要求失败后重选整篇文件。
 - 测试不会调用真实平台上传服务。Chrome 测试分别运行真正的 wangEditor 3.1.1 和 4.7.15，用受控上传回调与 HTTP 响应验证行为；它不等同于腾讯线上接口验收。
@@ -37,6 +39,6 @@ npm ci
 npm run check
 ```
 
-`check` 包含 ESLint、Node 单元/页面夹具、构建与元数据检查、面板挂载和独立 Chrome 浏览器验证。需要本机安装 Chrome/Chromium；可通过 `DRAFTFERRY_CHROME_PATH` 指定可执行文件。浏览器使用临时用户目录，不接管日常浏览器；两版 wangEditor（3.x 使用 npm 别名固定版本）、Quill 2.0.3 和 Playwright 仅为开发依赖，不进入用户脚本。平台浏览器检查包含下载字节与导航、微信标题块级规范化、带搜狐真实降级规则的 Quill。
+`check` 包含 ESLint、Node 单元/页面夹具、构建与元数据检查、面板挂载和独立 Chrome 浏览器验证。需要本机安装 Chrome/Chromium；可通过 `DRAFTFERRY_CHROME_PATH` 指定可执行文件。浏览器使用临时用户目录，不接管日常浏览器；两版 wangEditor（3.x 使用 npm 别名固定版本）、Quill 2.0.3、CKEditor 4.22.1 和 Playwright 仅为开发依赖，不进入用户脚本。CKEditor 的固定旧版本仅用于离线兼容验证，不部署为编辑器服务。平台浏览器检查包含下载字节与导航、微信标题块级规范化、带搜狐真实降级规则的 Quill，以及阿里云的完整脚本 SPA 首次进入、无导航接口兼容路径和真实 CKEditor 导入恢复流程。
 
 发布前提高 package 与 lockfile 的版本，运行完整检查并保存源代码提交。发布仅替换既有 `tools/draftferry.user.js`，在站点目录外备份旧文件；通过原 URL 获取完整文件核对版本和 SHA-256。不要把本地构建成功当作发布成功。

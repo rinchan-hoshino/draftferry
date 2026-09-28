@@ -20,9 +20,10 @@ const metadata = `// ==UserScript==
 // @match        https://baijiahao.baidu.com/*
 // @match        https://mp.toutiao.com/*
 // @match        https://mp.sohu.com/*
-// @match        https://msp.aliyun.com/msp/commodity/list*
+// @match        https://msp.aliyun.com/*
 // @match        https://console.cloud.tencent.com/serviceprovider/products/createNew*
 // @grant        unsafeWindow
+// @grant        window.onurlchange
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==`

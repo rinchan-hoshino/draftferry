@@ -4,12 +4,12 @@ import { renderMermaidPng } from './mermaid-png.js'
 import { createPanel } from './panel.js'
 import { createPlatformTarget, detectPlatform, getPlatformById } from './platforms.js'
 import { ImportTask } from './import-task.js'
+import { observePageLocation } from './page-location.js'
 
 const page = window
 const pageDocument = document
 let panel
 let selectedContext
-let routeTimer
 let panelPlatformId
 
 function getPageWindow() {
@@ -39,13 +39,7 @@ const task = new ImportTask({
     fixturePlatformId: context.platformId,
     pageWindow: getPageWindow(),
   }),
-  onChange: state => {
-    panel?.setState(state)
-    // Navigation API is preferred; this short-lived fallback also catches SPA
-    // transitions on older browsers, without patching the site's history API.
-    if (task.busy && !routeTimer) routeTimer = page.setInterval(syncPanel, 750)
-    if (!task.busy && routeTimer) { page.clearInterval(routeTimer); routeTimer = null }
-  },
+  onChange: state => panel?.setState(state),
 })
 
 function diagnose() {
@@ -110,7 +104,12 @@ function syncPanel() {
 syncPanel()
 const observer = new page.MutationObserver(syncPanel)
 observer.observe(pageDocument.body, { childList: true })
-page.addEventListener('popstate', syncPanel)
-page.addEventListener('hashchange', syncPanel)
-page.navigation?.addEventListener?.('currententrychange', syncPanel)
-page.addEventListener('pagehide', () => task.pause('页面已离开，导入已暂停。'))
+observePageLocation(page, syncPanel)
+page.addEventListener('pagehide', () => {
+  observer.disconnect()
+  task.pause('页面已离开，导入已暂停。')
+})
+page.addEventListener('pageshow', () => {
+  observer.observe(pageDocument.body, { childList: true })
+  syncPanel()
+})

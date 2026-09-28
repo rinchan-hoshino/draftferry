@@ -19,6 +19,9 @@ const helper = await build({
   bundle: true, format: 'iife', globalName: 'DraftFerryTest', write: false,
 })
 const browser = await chromium.launch({ executablePath, headless: true })
+const userscript = await readFile(resolve('dist/draftferry.user.js'), 'utf8')
+const userscriptMatches = [...userscript.matchAll(/^\/\/ @match\s+(\S+)/gm)].map(([, pattern]) =>
+  new RegExp(`^${pattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`))
 let checks = 0
 async function check(name, url, run) {
   const page = await browser.newPage({ acceptDownloads: true })
@@ -35,6 +38,31 @@ async function check(name, url, run) {
 }
 
 try {
+  for (const [name, startUrl, legacy] of [
+    ['阿里云从控制台首次进入编辑页无需刷新', 'https://msp.aliyun.com/', false],
+    ['阿里云缺少导航通知时空闲切页仍能挂载', 'https://msp.aliyun.com/msp/commodity/list', true],
+  ]) {
+    await check(name, startUrl, async page => {
+      // Model the userscript manager's initial @match gate before evaluating the
+      // actual release artifact; a script cannot handle routes if never loaded.
+      assert.ok(userscriptMatches.some(match => match.test(startUrl)), `启动地址未被用户脚本覆盖：${startUrl}`)
+      if (legacy) await page.evaluate(() => {
+        Object.defineProperty(globalThis, 'navigation', { value: undefined, configurable: true })
+      })
+      await page.addScriptTag({ content: userscript })
+      const panel = page.locator('#rin-draftferry-panel')
+      assert.equal(await panel.count(), 0)
+      await page.evaluate(() => {
+        globalThis.history.pushState({}, '', '/msp/commodity/list/~/publish/basic?commodityId=69735')
+      })
+      await panel.waitFor({ state: 'attached' })
+      assert.equal(await panel.count(), 1)
+      await page.evaluate(() => globalThis.history.replaceState({}, '', '/msp/commodity/list'))
+      await panel.waitFor({ state: 'detached' })
+      assert.equal(await page.locator('input,textarea,[contenteditable]').count(), 0)
+    })
+  }
+
   await check('搜狐真实 Quill 保留两级标题、深层加粗及代码字面量', 'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle', async page => {
     // The optional snapshot runs the same check against Sohu's downloaded
     // production Quill. Normal check remains offline with the pinned version.

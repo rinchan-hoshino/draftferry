@@ -28,8 +28,14 @@ export function findAliyunDetailEditor(document, windowObject = document.default
     typeof editor.getData !== 'function'
     || typeof editor.setData !== 'function'
     || typeof editor.fire !== 'function'
+    || typeof editor.editable !== 'function'
+    || typeof editor.createRange !== 'function'
+    || typeof editor.getSelection !== 'function'
   ) {
     throw new Error('阿里云市场：产品详情 CKEditor 接口不完整')
+  }
+  if (!editor.editable() || editor.readOnly || (editor.mode && editor.mode !== 'wysiwyg')) {
+    throw new Error('阿里云市场：请等待产品详情加载完成，并切换到可编辑的富文本模式')
   }
   return editor
 }
@@ -152,7 +158,6 @@ export async function injectAliyunMarket(document, article, options) {
   const expectedImages = articleImages.count
   let uploadObservation
   try {
-    await setCkEditorData(windowObject, editor, '')
     options.assertCurrent?.()
     uploadObservation = observeAliyunUploadResponses(
       windowObject,
@@ -163,6 +168,12 @@ export async function injectAliyunMarket(document, article, options) {
     )
     preservingFocus(windowObject, () => {
       editor.focus?.()
+      // setData('') rebuilds the classic editor's iframe and invalidates the
+      // locked editable. Replace its content through CKEditor's own selection
+      // and paste pipeline instead, keeping both the target and upload hooks.
+      const range = editor.createRange()
+      range.selectNodeContents(editor.editable())
+      editor.getSelection().selectRanges([range])
       editor.fire('paste', {
         type: 'html',
         method: 'paste',

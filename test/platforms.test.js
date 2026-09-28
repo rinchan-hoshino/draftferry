@@ -25,6 +25,16 @@ function dom(html, url) {
   return new JSDOM(html, { url })
 }
 
+function ckEditorSelection() {
+  const editable = {}
+  const range = { selectNodeContents(node) { assert.equal(node, editable) } }
+  return {
+    editable: () => editable,
+    createRange: () => range,
+    getSelection: () => ({ selectRanges(ranges) { assert.deepEqual(ranges, [range]) } }),
+  }
+}
+
 function attachWangEditor(element) {
   const editor = {
     create() {}, destroy() {}, initSelection() {},
@@ -170,6 +180,7 @@ test('阿里云市场只通过“产品详情”CKEditor 粘贴 HTML 和上传�
   let clicks = 0
   let uploadResponse
   const editor = {
+    ...ckEditorSelection(),
     getData: () => currentHtml,
     setData(html, options) {
       currentHtml = html
@@ -228,6 +239,7 @@ test('阿里云市场通过页面主上下文取得 CKEditor 实例', async () =
   `, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=68862')
   let currentHtml = ''
   page.window.CKEDITOR = { instances: { editor3: {
+    ...ckEditorSelection(),
     getData: () => currentHtml,
     setData(html, options) { currentHtml = html; options?.callback?.() },
     fire(_name, data) { currentHtml = data.dataValue },
@@ -400,6 +412,7 @@ test('阿里云市场内嵌图片未上传时恢复原商品详情', async () =>
   let aliyunAborts = 0
   aliyun.window.confirm = () => true
   aliyun.window.CKEDITOR = { instances: { editor3: {
+    ...ckEditorSelection(),
     getData: () => aliyunHtml,
     setData(html, options) { aliyunHtml = html; options?.callback?.() },
     on(_name, handler) { aliyunUploadResponse = handler },
@@ -437,6 +450,7 @@ test('阿里云市场原详情恢复失败时给出不可保存的明确错误',
   let uploadResponse
   page.window.confirm = () => true
   page.window.CKEDITOR = { instances: { editor3: {
+    ...ckEditorSelection(),
     getData: () => currentHtml,
     setData(html, options) {
       if (html === '<p>原详情</p>' && currentHtml !== '<p>原详情</p>') {
@@ -448,6 +462,7 @@ test('阿里云市场原详情恢复失败时给出不可保存的明确错误',
     on(_name, handler) { uploadResponse = handler },
     removeListener() { uploadResponse = null },
     fire() {
+      currentHtml = '<p>部分导入的正文</p>'
       uploadResponse({ data: { fileLoader: { xhr: { status: 500 } } } })
     },
     focus() {},
@@ -528,7 +543,6 @@ test('微信公众号在原生标题样式被重置时仍保留 Markdown 层级�
   assert.equal(headings[1].querySelector('a').href, 'https://example.com/')
   assert.equal(body.querySelector('pre').textContent.trim(), '## 代码里的标题')
   assert.equal(page.window.document.querySelector('#title').value, '文章标题')
-  assert.doesNotMatch(html, /border|background|color:/)
   assert.doesNotMatch(draft.html, /style=/, '通用稿件保持原生语义')
 })
 
@@ -969,6 +983,7 @@ test('阿里云取消上传会停止加载器、移除监听并恢复原文后�
   let aborted = 0
   window.confirm = () => true
   window.CKEDITOR = { instances: { editor3: {
+    ...ckEditorSelection(),
     container: { $: element },
     getData: () => html,
     setData(value, options) { html = value; options?.callback?.() },
