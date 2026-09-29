@@ -38,6 +38,143 @@ async function check(name, url, run) {
 }
 
 try {
+  await check('浮条避开底部按钮，拖动不触发导入，位置按网站保留', 'https://mp.toutiao.com/profile_v4/graphic/publish', async page => {
+    await page.evaluate(() => {
+      const { document } = globalThis
+      document.body.innerHTML = '<textarea id="other">继续编辑</textarea><button id="publish" style="position:fixed;right:16px;bottom:16px;width:100px;height:40px">发布</button>'
+      globalThis.fileClicks = 0
+      globalThis.published = 0
+      document.querySelector('#publish').onclick = () => { globalThis.published++ }
+    })
+    await page.addScriptTag({ content: userscript })
+    const panel = page.locator('#rin-draftferry-panel')
+    const handle = panel.locator('.toolbar .drag-handle')
+    const viewport = page.viewportSize()
+    const initial = await panel.boundingBox()
+    assert.ok(Math.abs(initial.y + initial.height / 2 - viewport.height / 2) < 2)
+    assert.ok(Math.abs(initial.x + initial.width - viewport.width + 16) < 2)
+    await page.locator('#publish').click()
+    assert.equal(await page.evaluate(() => globalThis.published), 1)
+    await page.evaluate(() => {
+      const { document } = globalThis
+      const input = document.querySelector('#other')
+      input.focus()
+      input.setSelectionRange(1, 3)
+      document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('[data-rin-files]').addEventListener('click', event => {
+        event.preventDefault()
+        globalThis.fileClicks++
+      })
+    })
+    const grip = await handle.boundingBox()
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2 - 240, grip.y + grip.height / 2 - 100, { steps: 8 })
+    await page.mouse.up()
+    const moved = await panel.boundingBox()
+    assert.ok(Math.abs(initial.x - moved.x - 240) < 2)
+    assert.ok(Math.abs(initial.y - moved.y - 100) < 2)
+    assert.deepEqual(await page.evaluate(() => {
+      const { document } = globalThis
+      return [globalThis.fileClicks, document.activeElement.id, document.querySelector('#other').selectionStart, document.querySelector('#other').selectionEnd]
+    }), [0, 'other', 1, 3])
+    await page.reload()
+    await page.addScriptTag({ content: userscript })
+    await page.waitForFunction(({ x, y }) => {
+      const rect = globalThis.document.querySelector('#rin-draftferry-panel').getBoundingClientRect()
+      return Math.abs(rect.x - x) < 2 && Math.abs(rect.y - y) < 2
+    }, moved)
+    await handle.focus()
+    await page.keyboard.press('ArrowLeft')
+    assert.ok(Math.abs((await panel.boundingBox()).x - moved.x + 10) < 2)
+    await panel.locator('summary').click()
+    await panel.locator('[data-action="reset-position"]').click()
+    assert.ok(Math.abs((await panel.boundingBox()).x - initial.x) < 2)
+    // Leave this website with a nondefault position, then open a second origin.
+    await handle.focus()
+    await page.keyboard.press('ArrowLeft')
+    const secondUrl = 'https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle'
+    await page.route(secondUrl, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' }))
+    await page.goto(secondUrl)
+    await page.addScriptTag({ content: userscript })
+    assert.ok(Math.abs((await panel.boundingBox()).x - initial.x) < 2)
+  })
+
+  await check('窄屏、展开和禁止存储时浮条仍可移动且菜单留在屏内', 'https://mp.toutiao.com/profile_v4/graphic/publish', async page => {
+    await page.setViewportSize({ width: 320, height: 568 })
+    await page.evaluate(() => {
+      Object.defineProperty(globalThis, 'localStorage', { get() { throw new DOMException('Storage blocked', 'SecurityError') } })
+    })
+    await page.addScriptTag({ content: userscript })
+    const panel = page.locator('#rin-draftferry-panel')
+    await panel.locator('[data-rin-files]').setInputFiles({ name: '窄屏.md', mimeType: 'text/markdown', buffer: Buffer.from('# 一篇需要补充图片的稿件\n\n![待补图片](missing.png)') })
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'missing')
+    let rect = await panel.boundingBox()
+    assert.ok(rect.x >= 15 && rect.y >= 15 && rect.x + rect.width <= 305 && rect.y + rect.height <= 553, JSON.stringify(rect))
+    const handle = panel.locator('.header .drag-handle')
+    await handle.focus()
+    for (let index = 0; index < 20; index++) await page.keyboard.press('Shift+ArrowUp')
+    rect = await panel.boundingBox()
+    assert.ok(Math.abs(rect.y - 16) < 2)
+    await panel.locator('.dismiss').click()
+    const compactHandle = panel.locator('.toolbar .drag-handle')
+    await compactHandle.focus()
+    for (let index = 0; index < 20; index++) await page.keyboard.press('Shift+ArrowDown')
+    await panel.locator('summary').click()
+    await panel.locator('details[data-above="true"]').waitFor()
+    const menu = await panel.locator('.menu').boundingBox()
+    assert.ok(menu.x >= 0 && menu.y >= 0 && menu.x + menu.width <= 320 && menu.y + menu.height <= 568, JSON.stringify(menu))
+    await page.setViewportSize({ width: 736, height: 420 })
+    await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').getBoundingClientRect().bottom <= 405)
+    rect = await panel.boundingBox()
+    assert.ok(rect.x >= 15 && rect.y >= 15 && rect.x + rect.width <= 721 && rect.y + rect.height <= 405, JSON.stringify(rect))
+  })
+
+  await check('导入成功直接恢复入口，连续发稿、站内切页和刷新不保留上一篇面板', 'https://mp.toutiao.com/profile_v4/graphic/publish', async page => {
+    await page.evaluate(() => {
+      globalThis.document.body.innerHTML = '<textarea placeholder="请输入标题"></textarea><div class="ProseMirror" contenteditable="true"></div>'
+    })
+    await page.addScriptTag({ content: userscript })
+    const panel = page.locator('#rin-draftferry-panel')
+    const entry = panel.locator('[data-rin-action="import"]')
+    async function choose(markdown) {
+      const chooser = page.waitForEvent('filechooser')
+      await entry.click()
+      await (await chooser).setFiles({ name: '稿件.md', mimeType: 'text/markdown', buffer: Buffer.from(markdown) })
+      await page.waitForFunction(() => globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'idle')
+      assert.equal(await entry.innerText(), '导入 Markdown')
+      assert.equal(await panel.locator('.workbench').isVisible(), false)
+      assert.equal(await panel.locator('[data-rin-files]').inputValue(), '')
+      assert.equal(await panel.locator('h2').textContent(), '准备稿件')
+    }
+    await choose('# 第一篇\n\n第一篇正文')
+    assert.equal(await page.locator('textarea').inputValue(), '第一篇')
+    assert.equal(await page.locator('.ProseMirror').innerText(), '第一篇正文')
+
+    // The platform starts another article in the same editor and at the same
+    // URL. The ordinary entry must still open the chooser, without a menu.
+    await page.locator('textarea').fill('')
+    await page.locator('.ProseMirror').fill('')
+    await choose('# 第二篇\n\n第二篇正文')
+    assert.equal(await page.locator('textarea').inputValue(), '第二篇')
+    assert.equal(await page.locator('.ProseMirror').innerText(), '第二篇正文')
+
+    await page.evaluate(() => globalThis.history.pushState({}, '', '/profile_v4/index'))
+    await panel.waitFor({ state: 'detached' })
+    await page.evaluate(() => globalThis.history.pushState({}, '', '/profile_v4/graphic/publish'))
+    await panel.waitFor({ state: 'attached' })
+    assert.equal(await entry.innerText(), '导入 Markdown')
+    assert.equal(await panel.locator('h2').textContent(), '准备稿件')
+    assert.equal(await page.locator('.ProseMirror').innerText(), '第二篇正文')
+    const chooser = page.waitForEvent('filechooser')
+    await entry.click()
+    await (await chooser).setFiles([])
+    assert.equal(await entry.innerText(), '导入 Markdown')
+    await page.reload()
+    await page.addScriptTag({ content: userscript })
+    assert.equal(await entry.innerText(), '导入 Markdown')
+    assert.equal(await panel.locator('.workbench').isVisible(), false)
+  })
+
   for (const [name, startUrl, legacy] of [
     ['阿里云从控制台首次进入编辑页无需刷新', 'https://msp.aliyun.com/', false],
     ['阿里云缺少导航通知时空闲切页仍能挂载', 'https://msp.aliyun.com/msp/commodity/list', true],

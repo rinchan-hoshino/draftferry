@@ -23,11 +23,12 @@ test('补选缺失图片后沿用同一稿件，补齐才自动写入', async ()
   assert.equal(f.calls.length, 0)
   await f.task.resume(f.context(), [new f.window.File(['one'], 'one.png', { type: 'image/png' })])
   assert.equal(f.task.state.phase, 'missing')
+  assert.equal(f.task.draft, draft)
   assert.deepEqual(f.task.state.assets.filter(asset => asset.status === 'missing').map(asset => asset.name), ['two.png'])
   assert.equal(f.calls.length, 0)
   await f.task.resume(f.context(), [new f.window.File(['two'], 'two.png', { type: 'image/png' })])
-  assert.equal(f.task.state.phase, 'done')
-  assert.equal(f.task.draft, draft)
+  assert.equal(f.task.state.phase, 'idle')
+  assert.equal(f.task.draft, null)
   assert.equal(f.calls.length, 1)
   assert.match(f.calls[0].article.html, /alt="一"[\s\S]*alt="二"/)
   f.window.close()
@@ -77,7 +78,7 @@ test('图表失败后只重新转换失败项，保留已完成素材', async ()
   failure = false
   await f.task.resume(f.context())
   assert.deepEqual(renders, [0, 1, 1])
-  assert.equal(f.task.state.phase, 'done')
+  assert.equal(f.task.state.phase, 'idle')
   f.window.close()
 })
 
@@ -94,8 +95,8 @@ test('暂停立即终止等待，迟到的图表结果不会写入或覆盖新�
   complete(png)
   await wait()
   assert.equal(f.calls.length, 1)
-  assert.equal(f.task.state.title, '第二篇')
-  assert.equal(f.task.state.phase, 'done')
+  assert.equal(f.calls[0].article.title, '第二篇')
+  assert.equal(f.task.state.phase, 'idle')
   f.window.close()
 })
 
@@ -133,7 +134,7 @@ test('上传结果只对同一个目标编辑器复用，更换目标即清空',
   } }
   f.task.locateTarget = () => next
   await f.task.resume(f.context())
-  assert.equal(f.task.state.phase, 'done')
+  assert.equal(f.task.state.phase, 'idle')
   f.window.close()
 })
 
@@ -164,5 +165,40 @@ test('取消时恢复原文失败仍报告失败，不能被已暂停提示掩�
   await running
   assert.equal(f.task.state.phase, 'failed')
   assert.match(f.task.state.message, /不要保存/)
+  f.window.close()
+})
+
+test('成功后释放稿件并直接接受下一篇，旧回调不能复活已结束任务', async () => {
+  const phases = []
+  const f = fixture({ onChange: state => phases.push(state.phase) })
+  await f.task.start([markdownFile('# 第一篇\n\n第一篇正文')], f.context())
+  const idle = f.task.state
+  assert.equal(idle.phase, 'idle')
+  assert.equal(idle.canResume, false)
+  assert.equal(idle.title, '')
+  assert.equal(idle.filename, '')
+  assert.deepEqual(idle.assets, [])
+  for (const key of ['draft', 'pool', 'selectedFiles', 'target', 'article', 'context', 'controller']) assert.equal(f.task[key], null, key)
+  assert.equal(f.task.uploadCache.size, 0)
+  assert.equal(phases.includes('done'), false)
+  await f.task.resume(f.context())
+  assert.equal(f.calls.length, 1)
+  const old = f.calls[0].operation
+  old.onProgress('上一条任务的迟到进度')
+  old.onAssetProgress({ source: png, status: 'uploaded' })
+  assert.equal(f.task.state, idle)
+
+  let finishRead
+  const next = f.task.start([{ name: '下一篇.md', text: () => new Promise(resolve => { finishRead = resolve }) }], f.context())
+  old.onProgress('不能改写下一篇')
+  old.onAssetProgress({ source: png, status: 'uploaded' })
+  assert.equal(f.task.state.phase, 'reading')
+  assert.equal(f.task.state.filename, '下一篇.md')
+  assert.equal(f.task.state.message, '正在读取稿件…')
+  finishRead('# 第二篇\n\n第二篇正文')
+  await next
+  assert.equal(f.calls.length, 2)
+  assert.equal(f.calls[1].article.title, '第二篇')
+  assert.equal(f.task.state.phase, 'idle')
   f.window.close()
 })

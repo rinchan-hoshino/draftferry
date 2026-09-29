@@ -2,6 +2,7 @@ import { createDraft, renderDraft } from './draft.js'
 import { AssetPool, AssetIssue, abortable, assertNotAborted } from './assets.js'
 
 export const BUSY_PHASES = new Set(['reading', 'preparing', 'importing', 'pausing'])
+const idleState = () => ({ phase: 'idle', assets: [], message: '', filename: '', title: '', canResume: false })
 
 export class ImportTask {
   constructor({ windowObject, renderMermaid, locateTarget, onChange = () => {} }) {
@@ -11,7 +12,7 @@ export class ImportTask {
     this.onChange = onChange
     this.epoch = 0
     this.uploadCache = new Map()
-    this.state = { phase: 'idle', assets: [], message: '', filename: '', title: '' }
+    this.state = idleState()
   }
 
   get busy() { return BUSY_PHASES.has(this.state.phase) }
@@ -41,7 +42,7 @@ export class ImportTask {
     this.target = null
     this.article = null
     this.uploadCache = new Map()
-    this.update({ phase: 'reading', filename: file.name, title: '', assets: [], destination: context.destination, message: '正在读取稿件…', result: null, retryLabel: '重试未完成项' })
+    this.update({ phase: 'reading', filename: file.name, title: '', assets: [], destination: context.destination, message: '正在读取稿件…', retryLabel: '重试未完成项' })
     try {
       const markdown = await abortable(file.text(), controller.signal)
       if (epoch !== this.epoch) return
@@ -95,7 +96,7 @@ export class ImportTask {
       this.target = target
       this.update({ phase: 'importing', message: `正在填入${context.field}，编辑区域暂时锁定…`,
         retryLabel: target.capabilities?.retryUploadedImages ? '重试未完成项' : '重试导入' })
-      const result = await target.commit(this.article, {
+      await target.commit(this.article, {
         signal,
         uploadCache: this.uploadCache,
         assetNames: new Map(this.draft.assets.map(asset => [prepared.get(asset.id), asset.name])),
@@ -108,13 +109,27 @@ export class ImportTask {
         },
       })
       current()
-      this.update({ phase: 'done', message: `已填入${context.field}`, result, summary: {
-        imageCount: this.article.imageCount, mermaidCount: this.article.mermaidCount,
-        tableCount: this.article.tableCount, codeCount: this.article.codeCount,
-      } })
+      this.complete()
     } catch (error) {
       this.fail(error, epoch)
     }
+  }
+
+  complete() {
+    // Commit has finished its cleanup. Retire callbacks before releasing the
+    // draft; a completed import has no resumable work and no persistent state.
+    this.epoch++
+    this.controller = null
+    this.context = null
+    this.selectedFiles = null
+    this.draft = null
+    this.pool = null
+    this.target = null
+    this.article = null
+    this.pauseMessage = null
+    this.uploadCache = new Map()
+    this.state = idleState()
+    this.onChange(this.state)
   }
 
   fail(error, epoch) {

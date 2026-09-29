@@ -133,15 +133,6 @@ export function createPlatformTarget(document, options = {}) {
         && elements.length === other.elements.length
         && elements.every((element, index) => element === other.elements[index])
     },
-    reveal() {
-      const body = platform.id === 'sohu'
-        ? elements.find(element => element.classList.contains('ql-editor'))
-        : elements.at(-1)
-      if (!body) return false
-      if (!body.isConnected) return false
-      body.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      return true
-    },
     commit(article, operation) {
       if (pageWindow.location.href !== url || elements.some(element => !element.isConnected)) {
         throw new Error('目标编辑器已切换，请在当前页面继续导入')

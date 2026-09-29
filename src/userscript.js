@@ -39,7 +39,10 @@ const task = new ImportTask({
     fixturePlatformId: context.platformId,
     pageWindow: getPageWindow(),
   }),
-  onChange: state => panel?.setState(state),
+  onChange: state => {
+    if (state.phase === 'idle') selectedContext = null
+    panel?.setState(state)
+  },
 })
 
 function diagnose() {
@@ -58,12 +61,6 @@ function onAction(action) {
   const context = currentContext()
   if (action === 'diagnose') { diagnose(); return }
   if (action === 'pause') { task.pause(); return }
-  if (action === 'reveal') {
-    if (task.target?.url !== page.location.href || !task.target.reveal()) {
-      panel.setStatus('这篇稿件已在原目标中完成，请回到原页面查看正文。')
-    } else panel.collapse()
-    return
-  }
   if (!context) { panel?.setStatus('请先回到目标平台的编辑页面', 'error'); return }
   if (action === 'resume' && (task.pool || task.selectedFiles)) { void task.resume(context); return }
   if (task.busy) return
