@@ -30,7 +30,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 let checks = 0
 
 async function check(name, run) {
-  const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1100, height: 900 } })
   page.setDefaultTimeout(7000)
   try {
     await page.route('**/*', route => route.abort())

@@ -8,6 +8,8 @@ const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'ut
 
 const metadata = `// ==UserScript==
 // @name         稿渡 · Markdown 一键排版（Preview）
+// @name:zh-CN   稿渡
+// @name:en      DraftFerry
 // @namespace    k-neco.draftferry
 // @version      ${packageJson.version}
 // @description  为八个平台提供 Markdown 导入和 Mermaid 转图；不会自动保存或发布。

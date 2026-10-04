@@ -26,7 +26,7 @@ async function withUserscriptGlobals(dom, callback) {
 }
 
 test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复', async () => {
-  const dom = new JSDOM(`<!doctype html><html><head><meta name="rin-platform-fixture" content="zhihu"></head><body></body></html>`, {
+  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><head><meta name="rin-platform-fixture" content="zhihu"></head><body></body></html>`, {
     url: 'file:///draftferry-startup.html',
   })
   const observers = []
@@ -78,7 +78,7 @@ test('稿渡只监听 body 直属子节点，并可在面板被移除后恢复',
 })
 
 test('搜狐页面单击下载诊断即可取得全页结构和实例分层结果', async () => {
-  const dom = new JSDOM(`<!doctype html><html><head><meta name="rin-platform-fixture" content="sohu"></head><body>
+  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><head><meta name="rin-platform-fixture" content="sohu"></head><body>
     <div class="ql-container"><div class="ql-editor" contenteditable="true"><p><br></p></div></div>
   </body></html>`, { url: 'file:///draftferry-sohu-diagnostic.html' })
   disableAutomaticMutationCallbacks(dom)
@@ -143,7 +143,7 @@ test('四个后台通过 SPA 进入真实编辑路由时才挂载面板', async 
   ]
 
   for (const [index, { listUrl, editorPath }] of cases.entries()) {
-    const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+    const dom = new JSDOM('<!doctype html><html lang="zh-CN"><body><main></main></body></html>', {
       url: listUrl,
     })
     disableAutomaticMutationCallbacks(dom)
@@ -169,7 +169,7 @@ test('四个后台通过 SPA 进入真实编辑路由时才挂载面板', async 
 })
 
 test('没有 Navigation API 时可通过 popstate 挂载后台编辑面板', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+  const dom = new JSDOM('<!doctype html><html lang="zh-CN"><body><main></main></body></html>', {
     url: 'https://mp.sohu.com/mpfe/v4/contentManagement/news/list',
   })
   disableAutomaticMutationCallbacks(dom)
@@ -189,7 +189,7 @@ test('没有 Navigation API 时可通过 popstate 挂载后台编辑面板', asy
 })
 
 test('阿里云空闲时静默切换地址也能显示和移除面板', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+  const dom = new JSDOM('<!doctype html><html lang="zh-CN"><body><main></main></body></html>', {
     url: 'https://msp.aliyun.com/msp/commodity/list',
     pretendToBeVisual: true,
   })
@@ -209,7 +209,7 @@ test('阿里云空闲时静默切换地址也能显示和移除面板', async ()
 })
 
 test('油猴地址通知和页面恢复均能重新检查阿里云编辑入口', async () => {
-  const dom = new JSDOM('<!doctype html><html><body><main></main></body></html>', {
+  const dom = new JSDOM('<!doctype html><html lang="zh-CN"><body><main></main></body></html>', {
     url: 'https://msp.aliyun.com/',
     pretendToBeVisual: true,
   })

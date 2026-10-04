@@ -24,7 +24,7 @@ const userscriptMatches = [...userscript.matchAll(/^\/\/ @match\s+(\S+)/gm)].map
   new RegExp(`^${pattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`))
 let checks = 0
 async function check(name, url, run) {
-  const page = await browser.newPage({ acceptDownloads: true })
+  const page = await browser.newPage({ locale: 'zh-CN', acceptDownloads: true })
   page.setDefaultTimeout(7000)
   try {
     await page.route('**/*', route => route.abort())

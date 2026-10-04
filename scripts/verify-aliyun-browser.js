@@ -42,7 +42,7 @@ async function beginImageUpload(page) {
 }
 
 async function check(name, run) {
-  const page = await browser.newPage()
+  const page = await browser.newPage({ locale: 'zh-CN' })
   page.setDefaultTimeout(8000)
   try {
     await page.route('**/*', async route => {

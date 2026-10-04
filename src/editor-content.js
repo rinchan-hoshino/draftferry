@@ -1,3 +1,5 @@
+import { localize, localeFor } from './i18n.js'
+
 export function hasMeaningfulEditorContent(editor) {
   if (!editor) {
     return false
@@ -27,8 +29,7 @@ export const OVERWRITE_CONFIRM_MESSAGE = '当前文章已有内容，继续导�
 
 export function confirmPotentialOverwrite(windowObject, hasExistingContent) {
   if (!hasExistingContent) return
-  if (!windowObject.confirm(OVERWRITE_CONFIRM_MESSAGE)) {
+  if (!windowObject.confirm(localize(OVERWRITE_CONFIRM_MESSAGE, localeFor(windowObject.document)))) {
     throw new Error('已取消导入')
   }
 }
-

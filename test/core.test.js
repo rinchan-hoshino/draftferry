@@ -152,7 +152,7 @@ function installFakeQuill(
 }
 
 function createSohuDom() {
-  return new JSDOM(`
+  return new JSDOM(`<html lang="zh-CN">
     <input placeholder="请输入标题">
     <div class="ql-container"><div class="ql-editor"><p><br></p></div></div>
     <button id="save">保存</button>
