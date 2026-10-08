@@ -22,6 +22,23 @@ const ARTICLE_STYLES = {
   'li p': 'margin: 8px 0; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
 }
 
+function ensureTrailingParagraph(container) {
+  // A table, image, list or quote has no top-level text position after it.
+  // Keep one editable line outside that block, without accumulating blank lines.
+  const last = [...container.childNodes].reverse().find(node => (
+    node.nodeType === 1 || (node.nodeType === 3 && node.textContent.trim())
+  ))
+  const emptyInlineTags = new Set(['BR', 'SPAN', 'STRONG', 'EM', 'B', 'I', 'U', 'S', 'DEL', 'CODE', 'MARK', 'SUB', 'SUP', 'A'])
+  const canReuse = last?.nodeType === 1 && last.tagName === 'P'
+    && !last.textContent.trim()
+    && [...last.querySelectorAll('*')].every(node => emptyInlineTags.has(node.tagName))
+    && !last.matches('[contenteditable="false"]')
+    && !last.querySelector('[contenteditable="false"]')
+  const paragraph = canReuse ? last : container.ownerDocument.createElement('p')
+  if (!paragraph.querySelector('br')) paragraph.append(container.ownerDocument.createElement('br'))
+  if (!canReuse) container.append(paragraph)
+}
+
 function prepareWechatHtml(document, html) {
   const container = parseHtml(document, html)
   // WeChat resets heading styles and may normalize the block tag. Carry the
@@ -60,6 +77,7 @@ function prepareWechatHtml(document, html) {
       list.remove()
     }
   }
+  ensureTrailingParagraph(container)
   // Clean empty structural nodes before decorating them; styling alone must not
   // turn an empty list item into meaningful article content.
   for (const [selector, cssText] of Object.entries(ARTICLE_STYLES)) {

@@ -15,11 +15,15 @@ const helper = await build({
     export { createDraft, renderDraft } from './src/draft.js'
     export { injectPlatformArticle } from './src/platforms.js'
     export { downloadDiagnosticFile } from './src/diagnostic-file.js'
+    export { Schema, DOMParser as ProseMirrorDOMParser } from 'prosemirror-model'
+    export { EditorState } from 'prosemirror-state'
+    export { EditorView } from 'prosemirror-view'
   `, resolveDir: process.cwd() },
   bundle: true, format: 'iife', globalName: 'DraftFerryTest', write: false,
 })
 const browser = await chromium.launch({ executablePath, headless: true })
 const userscript = await readFile(resolve('dist/draftferry.user.js'), 'utf8')
+const proseMirrorStyles = await readFile(resolve('node_modules/prosemirror-view/style/prosemirror.css'), 'utf8')
 const userscriptMatches = [...userscript.matchAll(/^\/\/ @match\s+(\S+)/gm)].map(([, pattern]) =>
   new RegExp(`^${pattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`))
 let checks = 0
@@ -326,5 +330,85 @@ try {
     assert.ok(result.sizes[0] > result.sizes[1] && result.sizes[1] > result.sizes[2] && result.sizes[2] > 16)
     assert.ok(result.weights.every(weight => weight >= 700))
   })
+  for (const [ending, html, completeScript = false] of [
+    ['表格', '<table><tbody><tr><td><p>客户资料</p></td></tr></tbody></table>'],
+    ['图片', '<p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=" alt="流程图"></p>'],
+    ['列表', '<ul><li><p>客户资料</p></li></ul>'],
+    ['引用', '<blockquote><p>客户资料</p></blockquote>'],
+    ['代码', '<pre><code>客户资料</code></pre>'],
+    ['正文', '<p>客户资料</p>'],
+    ['表格与图片整篇导入', '<table><tbody><tr><td><p>客户资料</p></td></tr></tbody></table><p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=" alt="流程图"></p>', true],
+  ]) {
+    await check(`微信${ending}结尾可在真实 ProseMirror 中点击并继续输入`, 'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2', async page => {
+      await page.evaluate(async ({ html, completeScript }) => {
+        const { document } = globalThis
+        const api = globalThis.DraftFerryTest
+        document.body.innerHTML = '<style>.ProseMirror{outline:1px solid #ddd}td{border:1px solid}img[src]{width:40px;height:40px}</style><textarea id="title"></textarea><input id="other"><div id="editor"></div>'
+        // A real editor with a controlled schema and content API, not WeChat's
+        // private build. Browser input updates its document through transactions.
+        const schema = new api.Schema({ nodes: {
+          doc: { content: 'block+' },
+          text: { group: 'inline' },
+          paragraph: { content: 'inline*', group: 'block', attrs: { style: { default: null } },
+            parseDOM: [{ tag: 'p', getAttrs: node => ({ style: node.getAttribute('style') }) }],
+            toDOM: node => ['p', node.attrs.style ? { style: node.attrs.style } : {}, 0] },
+          image: { inline: true, group: 'inline', attrs: { src: {}, alt: { default: null } },
+            parseDOM: [{ tag: 'img[src]', getAttrs: node => ({ src: node.getAttribute('src'), alt: node.getAttribute('alt') }) }],
+            toDOM: node => ['img', node.attrs] },
+          hard_break: { inline: true, group: 'inline', parseDOM: [{ tag: 'br' }], toDOM: () => ['br'] },
+          table: { content: 'table_row+', group: 'block', parseDOM: [{ tag: 'table' }], toDOM: () => ['table', ['tbody', 0]] },
+          table_row: { content: 'table_cell+', parseDOM: [{ tag: 'tr' }], toDOM: () => ['tr', 0] },
+          table_cell: { content: 'block+', isolating: true, parseDOM: [{ tag: 'td' }, { tag: 'th' }], toDOM: () => ['td', 0] },
+          bullet_list: { content: 'list_item+', group: 'block', parseDOM: [{ tag: 'ul' }], toDOM: () => ['ul', 0] },
+          list_item: { content: 'paragraph block*', parseDOM: [{ tag: 'li' }], toDOM: () => ['li', 0] },
+          blockquote: { content: 'block+', group: 'block', parseDOM: [{ tag: 'blockquote' }], toDOM: () => ['blockquote', 0] },
+          code_block: { content: 'text*', group: 'block', code: true, marks: '',
+            parseDOM: [{ tag: 'pre', preserveWhitespace: 'full' }], toDOM: () => ['pre', ['code', 0]] },
+        } })
+        globalThis.wechatView = new api.EditorView(document.querySelector('#editor'), { state: api.EditorState.create({ schema }) })
+        globalThis.__MP_Editor_JSAPI__ = { invoke({ apiParam, sucCb }) {
+          const content = document.createElement('div')
+          content.innerHTML = apiParam.content
+          globalThis.wechatView.updateState(api.EditorState.create({ schema, doc: api.ProseMirrorDOMParser.fromSchema(schema).parse(content) }))
+          sucCb()
+        } }
+        document.querySelector('#other').focus()
+        if (!completeScript) await api.injectPlatformArticle(document, { title: '对接说明', html, portableMarkdown: '客户资料' })
+      }, { html, completeScript })
+      await page.addStyleTag({ content: proseMirrorStyles })
+      if (completeScript) {
+        await page.addScriptTag({ content: userscript })
+        await page.locator('#rin-draftferry-panel').locator('[data-rin-files]').setInputFiles({
+          name: '对接说明.md', mimeType: 'text/markdown', buffer: Buffer.from(`# 对接说明\n\n${html}`),
+        })
+        await page.waitForFunction(() => globalThis.wechatView.state.doc.textContent.includes('客户资料')
+          && globalThis.document.querySelector('#rin-draftferry-panel').shadowRoot.querySelector('.workbench').dataset.state === 'idle')
+        assert.equal(await page.locator('#title').inputValue(), '对接说明')
+        assert.equal(await page.locator('.ProseMirror table').count(), 1)
+        assert.equal(await page.locator('.ProseMirror img[alt="流程图"]').count(), 1)
+      }
+      assert.equal(await page.evaluate(() => globalThis.document.activeElement.id), 'other', '导入不抢输入焦点')
+      const tail = page.locator('.ProseMirror > :last-child')
+      assert.equal(await tail.evaluate(node => node.tagName), 'P')
+      assert.equal(await tail.textContent(), '')
+      const bounds = await tail.boundingBox()
+      assert.ok(bounds.height >= 16, '末尾有可点击的输入行')
+      await tail.click({ position: { x: 5, y: bounds.height / 2 } })
+      await page.keyboard.type('追加正文')
+      await page.waitForFunction(() => globalThis.wechatView.state.doc.lastChild.textContent === '追加正文')
+      assert.equal(await tail.textContent(), '追加正文')
+      const result = await page.evaluate(() => {
+        const view = globalThis.wechatView
+        return { lastType: view.state.doc.lastChild.type.name, lastText: view.state.doc.lastChild.textContent,
+          depth: view.state.selection.$from.depth, firstText: view.state.doc.firstChild.textContent,
+          fontSize: globalThis.getComputedStyle(view.dom.lastElementChild).fontSize }
+      })
+      assert.equal(result.lastType, 'paragraph')
+      assert.equal(result.lastText, '追加正文')
+      assert.equal(result.depth, 1, '续写不进入表格、列表或引用内部')
+      assert.equal(result.firstText, ending === '图片' ? '' : '客户资料', '原内容保留')
+      assert.equal(result.fontSize, '16px')
+    })
+  }
 } finally { await browser.close() }
 console.log(`Platform browser verification: ${checks} scenarios passed`)
