@@ -6,6 +6,7 @@ import { createDraft, renderDraft } from '../src/draft.js'
 import {
   PLATFORM_IDS,
   detectPlatform,
+  createPlatformTarget,
   injectPlatformArticle,
 } from '../src/platforms.js'
 
@@ -1035,4 +1036,58 @@ test('知乎暂停解析时撤销只作用于正文，并恢复用户正在操�
   assert.equal(other.value, '保留其他字段')
   assert.equal(editor.hasAttribute('aria-busy'), false)
   window.close()
+})
+
+test('百家号第二篇跳过已脱离页面的旧 UEditor 实例', async () => {
+  const page = dom(`
+    <div class="client_components_titleInput"><div contenteditable="true"></div></div>
+    <div id="live-body"></div>
+  `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
+  const staleBody = page.window.document.createElement('div')
+  let staleHtml = '<p><br></p>'
+  let liveHtml = '<p><br></p>'
+  page.window.UE_V2 = {
+    instants: {
+      ueditorInstant0: {
+        body: staleBody,
+        getContent: () => staleHtml,
+        setContent: (html) => { staleHtml = html },
+      },
+      ueditorInstant1: {
+        body: page.window.document.querySelector('#live-body'),
+        getContent: () => liveHtml,
+        setContent: (html) => { liveHtml = html },
+      },
+    },
+  }
+
+  const target = createPlatformTarget(page.window.document)
+  assert.ok(target.elements.includes(page.window.document.querySelector('#live-body')))
+  const result = await injectPlatformArticle(page.window.document, article)
+
+  assert.equal(result.platformId, 'baijiahao')
+  assert.equal(liveHtml, article.html)
+  assert.equal(staleHtml, '<p><br></p>')
+})
+
+test('百家号标题优先走 insertText 进入编辑器状态', async () => {
+  const page = dom(`
+    <div class="client_components_titleInput"><div contenteditable="true"><p><br></p></div></div>
+  `, 'https://baijiahao.baidu.com/builder/rc/edit?type=news')
+  const commands = []
+  page.window.document.execCommand = (command, _ui, value) => {
+    commands.push([command, value])
+    page.window.document.querySelector('[contenteditable="true"]').innerHTML = `<p>${value}</p>`
+    return true
+  }
+  page.window.UE_V2 = {
+    instants: {
+      ueditorInstant0: { getContent: () => '', setContent() {} },
+    },
+  }
+
+  await injectPlatformArticle(page.window.document, article)
+
+  assert.deepEqual(commands, [['insertText', article.title]])
+  assert.equal(page.window.document.querySelector('[contenteditable="true"] p').textContent, article.title)
 })

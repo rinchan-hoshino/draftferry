@@ -1,4 +1,5 @@
 const activeEditors = new WeakSet()
+let importerInputDepth = 0
 const blockedEvents = [
   'beforeinput', 'paste', 'cut', 'drop', 'dragstart',
   'keydown', 'pointerdown', 'mousedown', 'touchstart', 'click', 'dblclick',
@@ -39,6 +40,7 @@ export async function withEditorLock(elements, operation, options = {}) {
     readOnly: 'readOnly' in element ? element.readOnly : null,
   }))
   const block = (event) => {
+    if (importerInputDepth > 0) return
     if (!event.isTrusted || (event.type === 'keydown' && isNavigationKey(event))) return
     const path = event.composedPath()
     const target = targets.find((element) => path.includes(element))
@@ -82,6 +84,17 @@ export async function withEditorLock(elements, operation, options = {}) {
         else element.setAttribute('tabindex', tabIndex)
       }
     }
+  }
+}
+
+// execCommand produces trusted beforeinput events; let the importer's own
+// synchronous edits through while the lock keeps blocking the user.
+export function allowImporterInput(operation) {
+  importerInputDepth += 1
+  try {
+    return operation()
+  } finally {
+    importerInputDepth -= 1
   }
 }
 

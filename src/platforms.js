@@ -4,7 +4,7 @@ import { withEditorLock } from './editor-lock.js'
 import { queryFirst } from './adapters/common.js'
 import { injectMarkdownTextEditor } from './adapters/markdown.js'
 import { pickWechatBodyEditor, injectWechat } from './adapters/wechat.js'
-import { findBaijiahaoTitle, injectBaijiahao } from './adapters/baijiahao.js'
+import { findBaijiahaoEditor, findBaijiahaoTitle, injectBaijiahao } from './adapters/baijiahao.js'
 import { injectToutiao } from './adapters/toutiao.js'
 import { injectZhihu } from './adapters/zhihu.js'
 import { findAliyunDetailEditor, injectAliyunMarket } from './adapters/aliyun-market.js'
@@ -100,7 +100,7 @@ function platformLockTargets(document, platformId, windowObject) {
     case 'tencent-market': elements = [findTencentDetailEditor(document)]; break
     case 'oschina': elements = [title, document.querySelector('textarea')]; break
     case 'wechat': elements = [document.querySelector('#title'), pickWechatBodyEditor(document)]; break
-    case 'baijiahao': elements = [findBaijiahaoTitle(document), windowObject.UE_V2?.instants?.ueditorInstant0?.body]; break
+    case 'baijiahao': elements = [findBaijiahaoTitle(document), findBaijiahaoEditor(windowObject)?.body]; break
     case 'zhihu': elements = [title, document.querySelector('.DraftEditor-root, .public-DraftEditor-content')]; break
     case 'toutiao': elements = [title, document.querySelector('.ProseMirror')]; break
     case 'sohu': elements = [title, findSohuEditor(document), document.querySelector('.ql-toolbar')]; break
