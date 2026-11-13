@@ -1,10 +1,15 @@
-import { editorTextLength, findLiveEditor, findTitleControl, fillTitle, writeBody } from './editor.js'
+import { detectPlatform } from './platforms/index.js'
 
 const MD_PATTERN = /\.(md|markdown)$/i
 
-// 一次导入：读 Markdown → 转换 → 写标题和正文 → 读回校验。
-// probe 记下找没找到编辑器和标题框，出错时给诊断用。
-export async function runImport({ pageWindow, files, text, buildArticle, confirm, probe = {} }) {
+// 一次导入：选平台 → 读 Markdown → 转换 → 写正文 → 写标题。
+// 每次都重新找编辑器，所以连着导第二篇、第三篇不用刷新。
+// probe 记下平台、编辑器和标题框找没找到，出错时给诊断用。
+export async function runImport({ pageWindow, url, files, text, buildArticle, probe = {} }) {
+  const platform = detectPlatform(url)
+  probe.platformId = platform?.id ?? null
+  if (!platform) throw new Error('当前页面不是稿渡支持的编辑页，请先进入文章编辑页')
+
   const mdFile = files.find(file => MD_PATTERN.test(file.name))
   let markdown
   let fallbackTitle = ''
@@ -17,26 +22,32 @@ export async function runImport({ pageWindow, files, text, buildArticle, confirm
     throw new Error('先把 .md 文件拖进来，或把 Markdown 粘贴到输入框里')
   }
 
-  const images = new Map(files.filter(file => file !== mdFile).map(file => [file.name, file]))
-  const editor = findLiveEditor(pageWindow)
-  const titleControl = findTitleControl(pageWindow.document)
-  probe.ueditorFound = Boolean(editor)
+  const doc = pageWindow.document
+  const titleControl = platform.findTitle(doc)
   probe.titleFound = Boolean(titleControl)
-  if (!editor) throw new Error('没找到正在编辑的正文，请确认页面是百家号图文编辑页')
+  let editor
+  try {
+    editor = platform.findEditor(doc, pageWindow)
+  } catch (error) {
+    probe.editorFound = false
+    throw error
+  }
+  probe.editorFound = true
 
+  const images = new Map(files.filter(file => file !== mdFile).map(file => [file.name, file]))
   const article = await buildArticle(markdown, { fallbackTitle, files: images })
-
-  const hasContent = editorTextLength(editor.getContent() ?? '') > 0 || Boolean(titleControl?.textContent.trim())
-  if (hasContent && !confirm('编辑器里已有内容，导入会整篇覆盖。继续吗？')) return { cancelled: true }
-
-  writeBody(editor, article.html)
-  if (article.title && titleControl) fillTitle(pageWindow, titleControl, article.title)
+  await editor.setHTML(article.html, { markdown: article.markdown })
+  if (article.title && titleControl && platform.writeTitle) {
+    platform.writeTitle(pageWindow, titleControl, article.title)
+  }
 
   return {
+    platformName: platform.name,
     title: article.title,
     imageCount: article.imageCount,
     missing: article.missing,
     mermaidErrors: article.mermaidErrors,
-    titleMissing: !titleControl,
+    titleMissing: Boolean(platform.writeTitle) && !titleControl,
+    titleUnsupported: !platform.writeTitle,
   }
 }

@@ -2,6 +2,8 @@ import { marked } from 'marked'
 import createDOMPurify from 'dompurify'
 
 const REMOTE_OR_INLINE = /^(https?:|data:)/i
+const IMAGE_PATTERN = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?((?:\s+"[^"]*")?)\s*\)/g
+const MERMAID_PATTERN = /^```mermaid[^\n]*\n([\s\S]*?)\n```[ \t]*$/gm
 
 // 第一处一级标题（不在代码块里）作为文章标题，并从正文里去掉这一行。
 export function splitTitle(markdown, fallbackTitle = '') {
@@ -28,7 +30,7 @@ export function splitTitle(markdown, fallbackTitle = '') {
   return { title: fallbackTitle, markdown }
 }
 
-function findFile(files, src) {
+export function findFile(files, src) {
   let name = src.split(/[?#]/)[0]
   try { name = decodeURIComponent(name) } catch { /* keep raw name */ }
   name = name.split(/[\\/]/).pop()
@@ -50,27 +52,67 @@ function readAsDataUrl(win, file) {
   })
 }
 
-// 把 Markdown 变成可写入编辑器的 HTML：标题拆出、marked 转换、DOMPurify 清洗、
-// 本地图片转 data URL、Mermaid 转 PNG。任何一张图出错都不中断，只记到结果里。
+// 把 Markdown 变成各平台都能用的材料：
+// - markdown：本地图片换成 data URL，Mermaid 换成 PNG 图片（给只吃 Markdown 的平台用）
+// - html：marked 转换 + DOMPurify 清洗（给吃 HTML 的平台用）
+// 任何一张图出错都不中断，只记到结果里。
 export function createArticleBuilder({ window: win, renderMermaid }) {
   const purify = createDOMPurify(win)
   const parser = new win.DOMParser()
 
-  return async function buildArticle(markdown, { fallbackTitle = '', files = new Map() } = {}) {
-    const split = splitTitle(markdown, fallbackTitle)
-    const rawHtml = String(marked.parse(split.markdown, { gfm: true, async: false }))
+  return async function buildArticle(source, { fallbackTitle = '', files = new Map() } = {}) {
+    const split = splitTitle(source, fallbackTitle)
+    const missing = []
+    const mermaidErrors = []
+    const mermaidCache = new Map()
+
+    let markdown = ''
+    let last = 0
+    for (const match of split.markdown.matchAll(IMAGE_PATTERN)) {
+      const [whole, alt, src, title] = match
+      markdown += split.markdown.slice(last, match.index)
+      last = match.index + whole.length
+      if (!src || REMOTE_OR_INLINE.test(src)) {
+        markdown += whole
+        continue
+      }
+      const file = findFile(files, src)
+      if (!file) {
+        missing.push(src)
+        markdown += `[缺图：${src}]`
+        continue
+      }
+      markdown += `![${alt}](${await readAsDataUrl(win, file)}${title})`
+    }
+    markdown += split.markdown.slice(last)
+
+    const mermaidBlocks = [...markdown.matchAll(MERMAID_PATTERN)]
+    let rebuilt = ''
+    last = 0
+    for (const block of mermaidBlocks) {
+      rebuilt += markdown.slice(last, block.index)
+      last = block.index + block[0].length
+      const code = block[1]
+      try {
+        if (!mermaidCache.has(code)) mermaidCache.set(code, await renderMermaid(code))
+        rebuilt += `![Mermaid 图](${mermaidCache.get(code)})`
+      } catch (error) {
+        mermaidErrors.push(error?.message || String(error))
+        rebuilt += block[0]
+      }
+    }
+    markdown = rebuilt + markdown.slice(last)
+
+    const rawHtml = String(marked.parse(markdown, { gfm: true, async: false }))
     const clean = purify.sanitize(rawHtml)
     const root = parser.parseFromString(`<!doctype html><body>${clean}`, 'text/html').body
-    const doc = root.ownerDocument
-
-    const missing = []
     for (const img of [...root.querySelectorAll('img')]) {
       const src = img.getAttribute('src') ?? ''
       if (!src || REMOTE_OR_INLINE.test(src)) continue
       const file = findFile(files, src)
       if (!file) {
         missing.push(src)
-        const note = doc.createElement('p')
+        const note = root.ownerDocument.createElement('p')
         note.textContent = `[缺图：${src}]`
         img.replaceWith(note)
         continue
@@ -78,22 +120,9 @@ export function createArticleBuilder({ window: win, renderMermaid }) {
       img.setAttribute('src', await readAsDataUrl(win, file))
     }
 
-    const mermaidErrors = []
-    for (const code of [...root.querySelectorAll('pre > code.language-mermaid')]) {
-      const pre = code.parentElement
-      try {
-        const png = await renderMermaid(code.textContent)
-        const img = doc.createElement('img')
-        img.setAttribute('src', png)
-        img.setAttribute('alt', 'Mermaid 图')
-        pre.replaceWith(img)
-      } catch (error) {
-        mermaidErrors.push(error?.message || String(error))
-      }
-    }
-
     return {
       title: split.title,
+      markdown,
       html: root.innerHTML,
       imageCount: root.querySelectorAll('img').length,
       missing,

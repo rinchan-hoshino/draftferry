@@ -3,6 +3,7 @@ const CSS = `
 * { box-sizing: border-box; font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
 .fab { position: fixed; right: 24px; bottom: 24px; z-index: 2147483000; border: 0; border-radius: 999px;
   padding: 10px 18px; background: #e8833a; color: #fff; font-size: 14px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.head { margin: 0 0 8px; font-weight: 600; color: #5a4632; }
 .panel { position: fixed; right: 24px; bottom: 76px; z-index: 2147483000; width: 340px; padding: 14px;
   background: #fff; color: #222; border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.22); font-size: 13px; }
 .panel[hidden] { display: none; }
@@ -23,7 +24,7 @@ button.diag[hidden] { display: none; }
 .diag-text[hidden] { display: none; }
 `
 
-export function mountPanel(doc, { run }) {
+export function mountPanel(doc, { run, heading = () => '' }) {
   const host = doc.createElement('div')
   host.id = 'rin-draftferry'
   const root = host.attachShadow({ mode: 'open' })
@@ -31,6 +32,7 @@ export function mountPanel(doc, { run }) {
     <style>${CSS}</style>
     <button class="fab" type="button">导入 Markdown</button>
     <section class="panel" hidden>
+      <p class="head"></p>
       <div class="drop">把 .md 和里面用到的图片一起拖进来，或点这里选</div>
       <input type="file" multiple accept=".md,.markdown,image/*" hidden>
       <textarea placeholder="或者直接把 Markdown 粘贴到这里"></textarea>
@@ -46,6 +48,7 @@ export function mountPanel(doc, { run }) {
   const $ = selector => root.querySelector(selector)
   const fab = $('.fab')
   const panel = $('.panel')
+  const head = $('.head')
   const drop = $('.drop')
   const fileInput = $('input[type=file]')
   const textarea = $('section textarea')
@@ -67,6 +70,7 @@ export function mountPanel(doc, { run }) {
   }
   const open = () => {
     clearTimeout(hideTimer)
+    head.textContent = heading()
     panel.hidden = false
   }
   const close = () => { panel.hidden = true }

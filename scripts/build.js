@@ -11,11 +11,18 @@ const metadata = `// ==UserScript==
 // @name:zh-CN   稿渡
 // @namespace    k-neco.draftferry
 // @version      ${packageJson.version}
-// @description  百家号图文编辑页：导入 Markdown、本地图片和 Mermaid 图。不会自动保存或发布。
+// @description  把 Markdown、本地图片和 Mermaid 图导入八个内容平台的编辑页。不会自动保存或发布。
 // @author       RinChan
 // @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
 // @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js
-// @match        https://baijiahao.baidu.com/builder/rc/edit*
+// @match        https://zhuanlan.zhihu.com/write*
+// @match        https://mp.weixin.qq.com/cgi-bin/appmsg*
+// @match        https://my.oschina.net/*/blog/ai-write*
+// @match        https://baijiahao.baidu.com/*
+// @match        https://mp.toutiao.com/*
+// @match        https://mp.sohu.com/*
+// @match        https://msp.aliyun.com/*
+// @match        https://console.cloud.tencent.com/serviceprovider/products/createNew*
 // @grant        unsafeWindow
 // @run-at       document-idle
 // @noframes

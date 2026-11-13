@@ -63,8 +63,9 @@ test('mermaid blocks become images, and failures stay as code with an error mess
   }
   const build = createArticleBuilder({ window, renderMermaid })
   const article = await build('```mermaid\nflowchart LR\n  A-->B\n```\n\n```mermaid\nbad\n```')
-  assert.deepEqual(seen, ['flowchart LR\n  A-->B\n', 'bad\n'])
+  assert.deepEqual(seen, ['flowchart LR\n  A-->B', 'bad'])
   assert.match(article.html, /<img src="data:image\/png;base64,AAAA" alt="Mermaid 图">/)
+  assert.match(article.markdown, /!\[Mermaid 图\]\(data:image\/png;base64,AAAA\)/)
   assert.match(article.html, /language-mermaid/)
   assert.deepEqual(article.mermaidErrors, ['Mermaid 语法错误：bad'])
 })
