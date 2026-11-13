@@ -7,25 +7,16 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 
 const metadata = `// ==UserScript==
-// @name         稿渡 · Markdown 一键排版（Preview）
+// @name         稿渡
 // @name:zh-CN   稿渡
-// @name:en      DraftFerry
 // @namespace    k-neco.draftferry
 // @version      ${packageJson.version}
-// @description  为八个平台提供 Markdown 导入和 Mermaid 转图；不会自动保存或发布。
+// @description  百家号图文编辑页：导入 Markdown、本地图片和 Mermaid 图。不会自动保存或发布。
 // @author       RinChan
 // @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
 // @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js
-// @match        https://zhuanlan.zhihu.com/write*
-// @match        https://mp.weixin.qq.com/cgi-bin/appmsg*
-// @match        https://my.oschina.net/*/blog/ai-write*
-// @match        https://baijiahao.baidu.com/*
-// @match        https://mp.toutiao.com/*
-// @match        https://mp.sohu.com/*
-// @match        https://msp.aliyun.com/*
-// @match        https://console.cloud.tencent.com/serviceprovider/products/createNew*
+// @match        https://baijiahao.baidu.com/builder/rc/edit*
 // @grant        unsafeWindow
-// @grant        window.onurlchange
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==`

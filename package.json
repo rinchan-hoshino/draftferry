@@ -1,15 +1,12 @@
 {
   "name": "draftferry-userscript",
-  "version": "0.7.2",
-  "description": "稿渡：为八个内容平台提供 Markdown 导入和 Mermaid 转图",
+  "version": "1.0.0",
+  "description": "百家号图文编辑页：导入 Markdown、本地图片和 Mermaid 图",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "build": "node scripts/build.js",
-    "check": "npm run lint && npm test && npm run build && npm run verify:dist && npm run verify:ui && npm run verify:browser",
     "lint": "eslint src scripts test/*.js",
-    "verify:dist": "node scripts/verify-dist.js",
-    "verify:ui": "node scripts/verify-ui.js",
-    "verify:browser": "node scripts/verify-browser.js && node scripts/verify-browser.js --editor=v3 && node scripts/verify-platform-browser.js && node scripts/verify-aliyun-browser.js"
+    "check": "npm run lint && npm test && npm run build"
   },
   "license": "MIT",
   "private": true,
@@ -21,17 +18,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "ckeditor4": "4.22.1",
     "esbuild": "^0.28.1",
     "eslint": "^10.8.0",
     "globals": "^16.5.0",
     "jsdom": "^26.1.0",
-    "playwright-core": "1.63.0",
-    "prosemirror-model": "1.25.12",
-    "prosemirror-state": "1.4.4",
-    "prosemirror-view": "1.42.6",
-    "quill": "2.0.3",
-    "wangeditor": "4.7.15",
-    "wangeditor-v3": "npm:wangeditor@3.1.1"
+    "playwright-core": "1.63.0"
   }
 }
