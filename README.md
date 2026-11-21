@@ -2,7 +2,7 @@
 
 把本地 Markdown 文章、配图和 Mermaid 图表直接导入八个内容平台的编辑页。脚本只负责填充标题和正文，不会自动保存或发布。
 
-[安装或更新脚本](https://acv.k-neco.com/tools/draftferry.user.js) · [更新记录](CHANGELOG.md)
+[安装或更新脚本](https://github.com/rinchan-hoshino/draftferry/releases/latest/download/draftferry.user.js) · [更新记录](CHANGELOG.md)
 
 ## 支持的平台
 
@@ -50,5 +50,5 @@ npm run test:browser
 
 ## 回退旧版（v0.7.2）
 
-如果新版在某个平台后台遇到兼容问题，可以点击 Release 中的 [draftferry-0.7.2-rollback.user.js](dist/draftferry-0.7.2-rollback.user.js) 一键覆盖降级回 `0.7.2`。该回滚包保留相同的脚本名称与命名空间，不会与新版双开冲突，且已移除自动更新地址，降级后不会被自动升回新版。
+如果新版在某个平台后台遇到兼容问题，可以点击 Release 中的 [draftferry-0.7.2-rollback.user.js](https://github.com/rinchan-hoshino/draftferry/releases/download/v1.0.0/draftferry-0.7.2-rollback.user.js) 一键覆盖降级回 `0.7.2`。该回滚包保留相同的脚本名称与命名空间，不会与新版双开冲突，且已移除自动更新地址，降级后不会被自动升回新版。
 

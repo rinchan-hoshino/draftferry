@@ -5,8 +5,8 @@
 // @version      1.0.0
 // @description  把 Markdown、本地图片和 Mermaid 图导入八个内容平台的编辑页。不会自动保存或发布。
 // @author       RinChan
-// @updateURL    https://acv.k-neco.com/tools/draftferry.user.js
-// @downloadURL  https://acv.k-neco.com/tools/draftferry.user.js
+// @updateURL    https://github.com/rinchan-hoshino/draftferry/releases/latest/download/draftferry.user.js
+// @downloadURL  https://github.com/rinchan-hoshino/draftferry/releases/latest/download/draftferry.user.js
 // @match        https://zhuanlan.zhihu.com/write*
 // @match        https://mp.weixin.qq.com/cgi-bin/appmsg*
 // @match        https://my.oschina.net/*/blog/ai-write*
