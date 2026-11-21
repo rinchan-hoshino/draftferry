@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
@@ -26,6 +27,9 @@ function copyMermaidVendor(): Plugin {
 }
 
 export default defineConfig({
+  test: {
+    css: true,
+  },
   build: {
     minify: true,
   },

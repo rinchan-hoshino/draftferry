@@ -139,6 +139,10 @@ export function prepareWechatHtml(doc: Document, html: string): string {
 
   ensureTrailingParagraph(container)
   applyCssToContainer(container, wechatCss)
+  const firstEl = container.firstElementChild as HTMLElement | null
+  if (firstEl?.style) {
+    firstEl.style.marginTop = '0'
+  }
 
   return container.innerHTML
 }

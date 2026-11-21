@@ -60,7 +60,8 @@ describe('platforms', () => {
       window.document,
       '<h2>标题</h2><pre><code class="language-ts"><span class="hljs-keyword">const</span> x: number = 42</code></pre><table><tr><td>a</td></tr></table>',
     )
-    assert.match(out, /<h2><span style="font-size: 22px;"><strong style="font-weight: 700;">标题<\/strong><\/span><\/h2>/)
+    assert.match(out, /<h2 style="[^"]*margin: 0px 0px 16px(?: 0px)?;[^"]*border-left: 4px solid rgb\(216, 165, 34\);[^"]*"><span style="font-size: 22px;"><strong style="font-weight: 700;">标题<\/strong><\/span><\/h2>/)
+    assert.match(out, /<span class="hljs-keyword" style="color: rgb\(215, 58, 73\);">const<\/span>/)
     assert.match(out, /<\/table><p[^>]*><br><\/p>$/)
   })
 
