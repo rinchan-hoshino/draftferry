@@ -4,8 +4,8 @@ const SCALE = 2
 const MAX_SIDE = 8192
 
 export const MERMAID_URLS = [
-  'https://acv.k-neco.com/tools/vendor/mermaid.min.js',
-  'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js',
+  `https://acv.k-neco.com/tools/vendor/mermaid-${__MERMAID_VERSION__}.min.js`,
+  `https://cdn.jsdelivr.net/npm/mermaid@${__MERMAID_VERSION__}/dist/mermaid.min.js`,
 ] as const
 
 export interface MermaidApi {
@@ -70,23 +70,12 @@ function evaluateMermaidScript(code: string): MermaidApi | null {
   return api && typeof api.render === 'function' ? api : null
 }
 
-function loadViaScriptTag(url: string): Promise<MermaidApi> {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = url
-    script.async = true
-    script.onload = () => {
-      script.remove()
-      const api = (globalThis as Record<string, unknown>).mermaid as MermaidApi | undefined
-      if (api && typeof api.render === 'function') resolve(api)
-      else reject(new Error(`Mermaid global missing after loading ${url}`))
-    }
-    script.onerror = () => {
-      script.remove()
-      reject(new Error(`Failed loading script ${url}`))
-    }
-    document.head.append(script)
-  })
+async function verifyMermaidIntegrity(code: string): Promise<void> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code))
+  const actual = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+  if (actual !== __MERMAID_SHA256__) {
+    throw new Error(`Mermaid 完整性校验失败：预期 ${__MERMAID_SHA256__}，实际 ${actual}`)
+  }
 }
 
 export async function defaultLoadMermaid(): Promise<MermaidApi> {
@@ -97,14 +86,11 @@ export async function defaultLoadMermaid(): Promise<MermaidApi> {
   for (const url of MERMAID_URLS) {
     try {
       const code = await fetchScriptText(url)
+      await verifyMermaidIntegrity(code)
       const api = evaluateMermaidScript(code)
       if (api) return api
     } catch (error) {
-      try {
-        return await loadViaScriptTag(url)
-      } catch (tagError) {
-        lastError = tagError ?? error
-      }
+      lastError = error
     }
   }
   throw new Error(

@@ -54,14 +54,13 @@ describe('platforms', () => {
     }
   })
 
-  it('wechat applies gold border headings, syntax highlighting, and trailing editable paragraph', () => {
+  it('wechat wraps headings with span > strong and appends trailing editable paragraph', () => {
     const { window } = new JSDOM('')
     const out = prepareWechatHtml(
       window.document,
-      '<h2>标题</h2><pre><code class="language-ts">const x: number = 42</code></pre><table><tr><td>a</td></tr></table>',
+      '<h2>标题</h2><pre><code class="language-ts"><span class="hljs-keyword">const</span> x: number = 42</code></pre><table><tr><td>a</td></tr></table>',
     )
-    assert.match(out, /border-left: 4px solid rgb\(216, 165, 34\)/)
-    assert.match(out, /<span style="color: #[0-9a-f]+">const<\/span>/)
+    assert.match(out, /<h2><span style="font-size: 22px;"><strong style="font-weight: 700;">标题<\/strong><\/span><\/h2>/)
     assert.match(out, /<\/table><p[^>]*><br><\/p>$/)
   })
 

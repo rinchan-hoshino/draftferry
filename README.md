@@ -17,9 +17,9 @@
 
 ## 架构亮点
 
-- **TypeScript + Vite + `vite-plugin-monkey`**：严格类型检查，单文件产物 `dist/folio.user.js` 体积 **< 280 KB**（较旧版瘦身 14 倍）。
-- **unified 双路 AST 转换**：基于 `remark-parse` + `remark-gfm` 构建 `mdast`，通路 A 由 `remark-stringify` 无损输出 Markdown，通路 B 由 `remark-rehype`（`allowDangerousHtml: false`）+ `rehype-sanitize` 严格防 XSS 后输出 HTML，彻底杜绝代码块误伤。
-- **Mermaid 真正按需懒加载**：未包含 `mermaid` 代码块时 0 字节加载；仅在需要时通过 `GM_xmlhttpRequest` 拉取外置 `mermaid.min.js` 渲染为 2x 白底 PNG 并做源码哈希缓存。
+- **TypeScript + Vite + `vite-plugin-monkey`**：严格类型检查，单文件产物 `dist/folio.user.js` 体积 **< 480 KB**（gzip **< 150 KB**）。
+- **unified 双路 AST 转换**：基于 `remark-parse` + `remark-gfm` 构建 `mdast`，通路 A 由 `remark-stringify` 无损输出 Markdown，通路 B 由 `remark-rehype`（`allowDangerousHtml: false`）+ `rehype-sanitize` 严格防 XSS 后经 `rehype-highlight`（18 种主力语言）生成 `.hljs-*` 节点输出 HTML，微信公众号再由 `stylis` 解析 `src/themes/wechat.css` 按特异性行内化。
+- **Mermaid 真正按需懒加载 + SHA-256 验签**：未包含 `mermaid` 代码块时 0 字节加载；仅在需要时通过 `GM_xmlhttpRequest` 拉取锁定精确版本的外置 `mermaid-${version}.min.js`，经 WebCrypto SHA-256 完整性校验通过后才执行，渲染为 2x 白底 PNG 并做源码哈希缓存。
 - **Preact Shadow DOM 悬浮面板**：明暗自适应、可拖拽胶囊与导入卡片、支持多次追加与同名图片去重、错误时导出脱敏诊断 JSON。
 
 ## 开发与验证

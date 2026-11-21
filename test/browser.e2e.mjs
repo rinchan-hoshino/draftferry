@@ -7,14 +7,17 @@ import { chromium } from 'playwright-core'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const bundlePath = resolve(root, 'dist/folio.user.js')
-const vendorMermaidPath = resolve(root, 'dist/vendor/mermaid.min.js')
+const mermaidPkg = JSON.parse(
+  await readFile(resolve(root, 'node_modules/mermaid/package.json'), 'utf8'),
+)
+const vendorMermaidPath = resolve(root, `dist/vendor/mermaid-${mermaidPkg.version}.min.js`)
 
 const bundleStat = await stat(bundlePath)
 assert.ok(
-  bundleStat.size < 280 * 1024,
-  `dist/folio.user.js size ${bundleStat.size} bytes exceeds 280 KB limit`,
+  bundleStat.size < 480 * 1024,
+  `dist/folio.user.js size ${bundleStat.size} bytes exceeds 480 KB limit`,
 )
-console.log(`PASS [0/4] dist/folio.user.js size check: ${bundleStat.size} bytes (< 280 KB)`)
+console.log(`PASS [0/4] dist/folio.user.js size check: ${bundleStat.size} bytes (< 480 KB)`)
 
 const bundleCode = await readFile(bundlePath, 'utf8')
 const vendorMermaidCode = await readFile(vendorMermaidPath, 'utf8')
@@ -84,7 +87,7 @@ try {
         </div>
       </body></html>`,
       async (route, reqUrl) => {
-        if (reqUrl === 'https://acv.k-neco.com/tools/vendor/mermaid.min.js') {
+        if (reqUrl === `https://acv.k-neco.com/tools/vendor/mermaid-${mermaidPkg.version}.min.js`) {
           mermaidFetchCount += 1
           await route.fulfill({
             status: 200,
@@ -241,7 +244,7 @@ try {
     const mpHtml = await page.evaluate(() => window.__mpContent)
     assert.doesNotMatch(mpHtml, /<script/i)
     assert.match(mpHtml, /border-left: 4px solid rgb\(216, 165, 34\)/)
-    assert.match(mpHtml, /<span style="color: #[0-9a-f]+">const<\/span>/)
+    assert.match(mpHtml, /<span[^>]*style="color: rgb\([^)]+\);?"[^>]*>const<\/span>/)
     assert.match(mpHtml, /<p[^>]*><br><\/p>$/)
 
     await context.close()

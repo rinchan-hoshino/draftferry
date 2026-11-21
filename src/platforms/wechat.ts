@@ -1,30 +1,8 @@
+import { compile } from 'stylis'
 import { assertReadBack, queryFirst, setControlValue } from '../dom.ts'
-import { highlightCodeToInlineHtml } from '../highlight.ts'
+import wechatCss from '../themes/wechat.css?raw'
 import type { PlatformAdapter } from '../types.ts'
 import { hostMatches } from './shared.ts'
-
-const ARTICLE_STYLES: Record<string, string> = {
-  p: 'margin: 0 0 20px; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
-  blockquote:
-    'margin: 22px 0; padding: 14px 18px; border-left: 4px solid #d9d9d9; background: #f7f7f7; color: #555; line-height: 1.8;',
-  'ul,ol':
-    'margin: 0 0 20px; padding-left: 1.8em; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
-  li: 'margin: 6px 0;',
-  table:
-    'width: 100%; margin: 22px 0; border-collapse: collapse; table-layout: fixed; font-size: 14px; line-height: 1.65; color: #2b2b2b;',
-  th: 'padding: 10px 12px; border: 1px solid #cfcfcf; background: #f2f2f2; font-weight: 700; text-align: left; word-break: break-word;',
-  td: 'padding: 10px 12px; border: 1px solid #cfcfcf; text-align: left; word-break: break-word;',
-  pre: 'margin: 22px 0; padding: 16px; border: 1px solid #dedede; border-radius: 5px; background: #f5f5f5; line-height: 1.65; white-space: pre-wrap; word-break: break-word;',
-  code: 'padding: 2px 4px; border-radius: 3px; background: #f2f2f2; color: #c7254e; font-family: Consolas, Monaco, monospace; font-size: 0.9em;',
-  'pre code':
-    'padding: 0; background: transparent; color: #333; font-family: Consolas, Monaco, monospace; font-size: 14px;',
-  img: 'display: block; max-width: 100%; height: auto; margin: 22px auto;',
-  hr: 'margin: 30px 0; border: 0; border-top: 1px solid #dedede;',
-  a: 'color: #1677b3; text-decoration: underline; word-break: break-word;',
-  strong: 'font-weight: 700;',
-  'blockquote p': 'margin: 0 0 12px; font-size: 16px; line-height: 1.8; color: #555;',
-  'li p': 'margin: 8px 0; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
-}
 
 const EMPTY_INLINE_TAGS = new Set([
   'BR',
@@ -59,30 +37,87 @@ function ensureTrailingParagraph(container: HTMLElement): void {
   if (!canReuse) container.append(paragraph)
 }
 
+type Specificity = [number, number, number, number]
+
+function computeSpecificity(selector: string, order: number): Specificity {
+  const cleaned = selector.replace(/::?[a-zA-Z-]+(\([^)]*\))?/g, (m) =>
+    m.startsWith('::') ? ' __el__ ' : ' .__cls__ ',
+  )
+  const idCount = (cleaned.match(/#[a-zA-Z_-][\w-]*/g) ?? []).length
+  const classAttrPseudoCount =
+    (cleaned.match(/\.[a-zA-Z_-][\w-]*/g) ?? []).length +
+    (cleaned.match(/\[[^\]]+\]/g) ?? []).length
+  const elementCount = (
+    cleaned
+      .replace(/#[a-zA-Z_-][\w-]*/g, ' ')
+      .replace(/\.[a-zA-Z_-][\w-]*/g, ' ')
+      .replace(/\[[^\]]+\]/g, ' ')
+      .match(/\b[a-zA-Z][\w-]*\b/g) ?? []
+  ).length
+  return [idCount, classAttrPseudoCount, elementCount, order]
+}
+
+function compareSpecificity(a: Specificity, b: Specificity): number {
+  for (let i = 0; i < 4; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i]
+  }
+  return 0
+}
+
+function applyCssToContainer(container: HTMLElement, css: string): void {
+  const rules: Array<{
+    selector: string
+    specificity: Specificity
+    declarations: Array<[string, string]>
+  }> = []
+  let order = 0
+  for (const node of compile(css)) {
+    if (node.type !== 'rule' || !Array.isArray(node.props) || !Array.isArray(node.children)) {
+      continue
+    }
+    const declarations: Array<[string, string]> = []
+    for (const child of node.children) {
+      if (child.type === 'decl' && typeof child.props === 'string' && typeof child.children === 'string') {
+        declarations.push([child.props, child.children])
+      }
+    }
+    if (declarations.length === 0) continue
+    for (const selector of node.props) {
+      const trimmed = selector.trim()
+      if (!trimmed) continue
+      rules.push({
+        selector: trimmed,
+        specificity: computeSpecificity(trimmed, order++),
+        declarations,
+      })
+    }
+  }
+
+  rules.sort((a, b) => compareSpecificity(a.specificity, b.specificity))
+
+  for (const rule of rules) {
+    let matched: NodeListOf<HTMLElement>
+    try {
+      matched = container.querySelectorAll<HTMLElement>(rule.selector)
+    } catch {
+      continue
+    }
+    for (const el of matched) {
+      for (const [prop, val] of rule.declarations) {
+        el.style.setProperty(prop, val)
+      }
+    }
+  }
+}
+
 export function prepareWechatHtml(doc: Document, html: string): string {
   const container = doc.createElement('div')
   container.innerHTML = html
 
-  // Syntax highlight <pre><code> blocks with inline <span style="color:..."> tokens
-  for (const codeEl of container.querySelectorAll('pre > code')) {
-    const langClass = [...codeEl.classList].find((cls) => cls.startsWith('language-'))
-    const lang = langClass ? langClass.slice('language-'.length) : ''
-    if (lang) {
-      codeEl.innerHTML = highlightCodeToInlineHtml(codeEl.textContent ?? '', lang)
-    }
-  }
-
   const headingSizes = [24, 22, 19, 17, 16, 16]
   for (const heading of container.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')) {
-    heading.style.cssText = 'font-weight: 700; line-height: 1.5; color: #202020;'
     const level = Number(heading.tagName[1])
     const size = `${headingSizes[level - 1]}px`
-    heading.style.fontSize = size
-    heading.style.margin = `${level <= 2 ? 32 : level === 3 ? 26 : 22}px 0 ${level <= 2 ? 16 : 12}px`
-    if (level <= 2) {
-      heading.style.borderLeft = '4px solid #d8a522'
-      heading.style.paddingLeft = '10px'
-    }
     const span = doc.createElement('span')
     span.style.fontSize = size
     const strong = doc.createElement('strong')
@@ -103,23 +138,7 @@ export function prepareWechatHtml(doc: Document, html: string): string {
   }
 
   ensureTrailingParagraph(container)
-
-  for (const [selector, cssText] of Object.entries(ARTICLE_STYLES)) {
-    for (const element of container.querySelectorAll<HTMLElement>(selector)) {
-      element.style.cssText = cssText
-    }
-  }
-  for (const element of container.querySelectorAll<HTMLElement>(
-    'blockquote > :last-child, li > :last-child',
-  )) {
-    element.style.marginBottom = '0'
-  }
-  for (const list of container.querySelectorAll<HTMLElement>('li > ul, li > ol')) {
-    list.style.margin = '8px 0 0'
-  }
-  if (container.firstElementChild) {
-    ;(container.firstElementChild as HTMLElement).style.marginTop = '0'
-  }
+  applyCssToContainer(container, wechatCss)
 
   return container.innerHTML
 }

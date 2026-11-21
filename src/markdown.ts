@@ -1,5 +1,24 @@
+import bash from 'highlight.js/lib/languages/bash'
+import c from 'highlight.js/lib/languages/c'
+import cpp from 'highlight.js/lib/languages/cpp'
+import csharp from 'highlight.js/lib/languages/csharp'
+import css from 'highlight.js/lib/languages/css'
+import diff from 'highlight.js/lib/languages/diff'
+import go from 'highlight.js/lib/languages/go'
+import ini from 'highlight.js/lib/languages/ini'
+import java from 'highlight.js/lib/languages/java'
+import javascript from 'highlight.js/lib/languages/javascript'
+import json from 'highlight.js/lib/languages/json'
+import markdownLang from 'highlight.js/lib/languages/markdown'
+import python from 'highlight.js/lib/languages/python'
+import rust from 'highlight.js/lib/languages/rust'
+import sql from 'highlight.js/lib/languages/sql'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import yaml from 'highlight.js/lib/languages/yaml'
 import type { Code, Image, Paragraph, Parent, Root, RootContent, Text } from 'mdast'
 import { toString as mdastToString } from 'mdast-util-to-string'
+import rehypeHighlight from 'rehype-highlight'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import rehypeStringify from 'rehype-stringify'
 import remarkGfm from 'remark-gfm'
@@ -29,9 +48,38 @@ const markdownSerializer = unified().use(remarkGfm).use(remarkStringify, {
   resourceLink: false,
 })
 
+const HIGHLIGHT_LANGUAGES = {
+  javascript,
+  typescript,
+  python,
+  rust,
+  go,
+  java,
+  c,
+  cpp,
+  csharp,
+  bash,
+  json,
+  yaml,
+  ini,
+  sql,
+  xml,
+  css,
+  markdown: markdownLang,
+  diff,
+}
+
 const htmlPipeline = unified()
   .use(remarkRehype, { allowDangerousHtml: false })
   .use(rehypeSanitize, SANITIZE_SCHEMA)
+  .use(rehypeHighlight, {
+    languages: HIGHLIGHT_LANGUAGES,
+    aliases: {
+      ini: ['toml'],
+      javascript: ['js', 'jsx'],
+      typescript: ['ts', 'tsx'],
+    },
+  })
   .use(rehypeStringify)
 
 export function findFile(files: Map<string, File>, src: string): File | null {
