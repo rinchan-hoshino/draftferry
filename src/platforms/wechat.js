@@ -1,8 +1,6 @@
 import { queryFirst, setControlValue, assertReadBack } from '../dom.js'
 import { hostMatches } from './shared.js'
 
-// DOM 事实与样式来自 legacy/src/adapters/wechat.js：标题是 #title，正文是 ProseMirror，
-// 写入走公众号编辑器自己的 JSAPI。金色标题、浅灰引用等排版只在这里生效。
 const ARTICLE_STYLES = {
   p: 'margin: 0 0 20px; font-size: 16px; line-height: 1.8; color: #2b2b2b;',
   blockquote: 'margin: 22px 0; padding: 14px 18px; border-left: 4px solid #d9d9d9; background: #f7f7f7; color: #555; line-height: 1.8;',
@@ -24,7 +22,6 @@ const ARTICLE_STYLES = {
 
 const EMPTY_INLINE_TAGS = new Set(['BR', 'SPAN', 'STRONG', 'EM', 'B', 'I', 'U', 'S', 'DEL', 'CODE', 'MARK', 'SUB', 'SUP', 'A'])
 
-// 表格、图片、列表、引用后面要留一个可以输入的段落，已有的空段落就复用。
 function ensureTrailingParagraph(container) {
   const doc = container.ownerDocument
   const last = [...container.childNodes].reverse().find(node => (
@@ -41,7 +38,6 @@ function ensureTrailingParagraph(container) {
 export function prepareWechatHtml(doc, html) {
   const container = doc.createElement('div')
   container.innerHTML = html
-  // 公众号会重置标题样式，所以层级同时写进内联格式里。
   const headingSizes = [24, 22, 19, 17, 16, 16]
   for (const heading of container.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     heading.style.cssText = 'font-weight: 700; line-height: 1.5; color: #202020;'
@@ -91,7 +87,7 @@ export function pickWechatBodyEditor(doc) {
 
 function invokeContentApi(win, html) {
   const invoke = win.__MP_Editor_JSAPI__?.invoke
-  if (typeof invoke !== 'function') throw new Error('微信公众号：未找到 mp_editor_set_content 接口，待真实页面确认')
+  if (typeof invoke !== 'function') throw new Error('微信公众号：未找到 mp_editor_set_content 接口')
   return new Promise((resolve, reject) => {
     let settled = false
     const finish = (error) => {
@@ -132,7 +128,8 @@ export default {
     if (!editor) throw new Error('微信公众号：未找到正文编辑器')
     return {
       getText: () => editor.textContent ?? '',
-      async setHTML(html) {
+      async setHTML(html, { onProgress } = {}) {
+        onProgress?.('写入正文…')
         const prepared = prepareWechatHtml(doc, html)
         await invokeContentApi(win, prepared)
         assertReadBack(html, editor.textContent ?? '')

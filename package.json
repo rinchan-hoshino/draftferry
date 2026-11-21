@@ -1,9 +1,10 @@
 {
   "name": "draftferry-userscript",
   "version": "1.0.0",
-  "description": "百家号图文编辑页：导入 Markdown、本地图片和 Mermaid 图",
+  "description": "把 Markdown、本地图片与 Mermaid 图一键导入八大内容平台编辑页的油猴脚本",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:browser": "node test/browser.e2e.js",
     "build": "node scripts/build.js",
     "lint": "eslint src scripts test/*.js",
     "check": "npm run lint && npm test && npm run build"

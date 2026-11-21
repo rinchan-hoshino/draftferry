@@ -1,8 +1,6 @@
 import { queryFirst, setControlValue, isUsable } from '../dom.js'
 import { hostMatches } from './shared.js'
 
-// 知乎：把 Markdown 当纯文本粘贴进 Draft 编辑器，再点两次确认解析。
-// 其中的 data 图片先上传到知乎图床，地址替换进 Markdown。DOM 事实来自 legacy/src/adapters/zhihu.js。
 const DIALOG_SELECTORS = [
   '[role="dialog"]', '[aria-modal="true"]', '.Modal-wrapper', '.Modal',
   '[class*="Modal"]', '[class*="modal"]', '[class*="Dialog"]', '[class*="dialog"]',
@@ -12,7 +10,7 @@ function dataUrlToBlob(win, source) {
   const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i)
   if (!match) throw new Error('知乎：内嵌图片不是有效的 Base64 图片')
   const binary = win.atob(match[2])
-  const bytes = win.Uint8Array.from(binary, character => character.charCodeAt(0))
+  const bytes = win.Uint8Array.from(binary, c => c.charCodeAt(0))
   return new win.Blob([bytes], { type: match[1].toLowerCase() })
 }
 
@@ -36,10 +34,11 @@ async function uploadDataImage(win, source, index) {
   return url.href
 }
 
-async function replaceDataImages(win, markdown) {
+async function replaceDataImages(win, markdown, onProgress) {
   const sources = [...new Set(markdown.match(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/gi) ?? [])]
   let result = markdown
   for (const [index, source] of sources.entries()) {
+    onProgress?.(`上传图片 ${index + 1}/${sources.length}…`)
     result = result.replaceAll(source, await uploadDataImage(win, source, index))
   }
   return result
@@ -49,8 +48,7 @@ function isActionable(button) {
   return !button.disabled && isUsable(button)
 }
 
-// 等待一个出现的按钮（找到就返回，超时返回 null）。
-function waitForButton(win, doc, predicate, timeoutMs, excluded, root) {
+function waitForButton(win, predicate, timeoutMs, excluded, root) {
   const find = () => [...root.querySelectorAll('button')].find(button => (
     !excluded.has(button) && isActionable(button) && predicate(button.textContent?.trim() ?? '')
   ))
@@ -87,20 +85,21 @@ export default {
     if (!editor) throw new Error('知乎：未找到正文编辑器')
     return {
       getText: () => editor.textContent ?? '',
-      async setHTML(_html, { markdown }) {
-        const ready = await replaceDataImages(win, markdown)
+      async setHTML(_html, { markdown, onProgress } = {}) {
+        const ready = await replaceDataImages(win, markdown, onProgress)
+        onProgress?.('等待知乎解析…')
         const transfer = new win.DataTransfer()
         transfer.setData('text/plain', ready)
         const before = new Set([...doc.querySelectorAll('button')].filter(isActionable))
         editor.focus({ preventScroll: true })
         editor.dispatchEvent(new win.ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }))
-        const parseButton = await waitForButton(win, doc, text => text.includes('确认并解析'), 5000, before, doc)
+        const parseButton = await waitForButton(win, text => text.includes('确认并解析'), 5000, before, doc)
         if (!parseButton) throw new Error('知乎：没有出现“确认并解析”')
         const dialog = parseButton.closest(DIALOG_SELECTORS.join(', '))
         if (!dialog) throw new Error('知乎：无法确认 Markdown 解析弹窗边界')
         const beforeParse = new Set([...dialog.querySelectorAll('button')].filter(isActionable))
         parseButton.click()
-        const confirmButton = await waitForButton(win, doc, text => text === '确认', 5000, beforeParse, dialog)
+        const confirmButton = await waitForButton(win, text => text === '确认', 5000, beforeParse, dialog)
         if (!confirmButton) throw new Error('知乎：没有出现解析后的“确认”')
         confirmButton.click()
       },

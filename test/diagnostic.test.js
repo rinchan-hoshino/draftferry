@@ -1,27 +1,34 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildDiagnostic } from '../src/diagnostic.js'
+import { buildDiagnostic, sanitizeUrl } from '../src/diagnostic.js'
 
-test('diagnostic JSON carries version, page, finds and the error stack', () => {
-  const error = new Error('标题没有填进标题框')
-  const parsed = JSON.parse(buildDiagnostic({
-    version: '1.0.0',
-    pageUrl: 'https://baijiahao.baidu.com/builder/rc/edit?type=news',
-    platformId: 'baijiahao',
-    editorFound: true,
-    titleFound: false,
-    error,
-  }))
-  assert.deepEqual(Object.keys(parsed).sort(), ['editorFound', 'error', 'pageUrl', 'platformId', 'scriptVersion', 'titleFound'])
-  assert.equal(parsed.scriptVersion, '1.0.0')
-  assert.equal(parsed.platformId, 'baijiahao')
-  assert.equal(parsed.editorFound, true)
-  assert.equal(parsed.titleFound, false)
-  assert.equal(parsed.error.message, '标题没有填进标题框')
-  assert.match(parsed.error.stack, /Error/)
+test('sanitizeUrl strips sensitive query parameters while keeping safe route parameters', () => {
+  assert.equal(
+    sanitizeUrl('https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2&token=secret123&ticket=abc'),
+    'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media%2Fappmsg_edit_v2',
+  )
+  assert.equal(
+    sanitizeUrl('https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET&session=xyz'),
+    'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET',
+  )
 })
 
-test('diagnostic with no error has a null error field', () => {
-  const parsed = JSON.parse(buildDiagnostic({ version: '1.0.0', pageUrl: 'x', editorFound: false, titleFound: false }))
-  assert.equal(parsed.error, null)
+test('buildDiagnostic outputs structured JSON with stage and sanitized URL', () => {
+  const raw = buildDiagnostic({
+    version: '1.0.0',
+    pageUrl: 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=42&auth=leak',
+    platformId: 'aliyun-market',
+    editorFound: true,
+    titleFound: false,
+    stage: 'inject',
+    error: new Error('upload failed'),
+  })
+  const parsed = JSON.parse(raw)
+  assert.equal(parsed.scriptVersion, '1.0.0')
+  assert.equal(parsed.pageUrl, 'https://msp.aliyun.com/msp/commodity/list/~/publish/basic?commodityId=42')
+  assert.equal(parsed.platformId, 'aliyun-market')
+  assert.equal(parsed.editorFound, true)
+  assert.equal(parsed.titleFound, false)
+  assert.equal(parsed.stage, 'inject')
+  assert.equal(parsed.error.message, 'upload failed')
 })

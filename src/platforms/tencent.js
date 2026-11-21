@@ -1,8 +1,6 @@
-import { collectOpenRoots, isUsable, squash } from '../dom.js'
+import { collectOpenRoots, isUsable, scanFrameworkInstances, squash } from '../dom.js'
 import { hostMatches } from './shared.js'
 
-// 腾讯云市场：只写“商品详情”的 wangEditor v3 字段。DOM 事实与上传逻辑来自 legacy/src/tencent-market.js。
-// wangEditor 实例在页面框架（Vue）里，只接受 txt.html 和 $textElem 都对得上这个编辑区的那一个。
 const UPLOAD_TIMEOUT_MS = 30_000
 
 function normalizedLabel(element) {
@@ -62,31 +60,13 @@ export function findTencentDetailEditor(doc) {
   throw new Error('腾讯云市场：未找到唯一且标注为“商品详情”的编辑器')
 }
 
-// 从编辑区往上找 Vue 组件，取到一个 wangEditor v3：有 txt.html，且 $textElem 指向这个编辑区。
 export function findWangEditor(target) {
-  const found = []
-  const seen = new Set()
-  const queue = []
-  for (let el = target; el; el = el.parentElement) {
-    const owner = Object.getOwnPropertyDescriptor(el, '__vue__')?.value
-    if (owner) queue.push({ value: owner, depth: 0 })
-  }
-  while (queue.length) {
-    const { value, depth } = queue.shift()
-    if (!value || typeof value !== 'object' || seen.has(value) || depth > 8) continue
-    seen.add(value)
-    try {
-      if (typeof value.txt?.html === 'function' && value.$textElem) {
-        const first = value.$textElem.elems?.[0] ?? value.$textElem[0]
-        if (first === target) found.push(value)
-      }
-    } catch { /* 取不到的字段当作不是编辑器 */ }
-    for (const key of ['editor', '$parent', '_data', 'data', 'props']) {
-      try {
-        if (value[key]) queue.push({ value: value[key], depth: depth + 1 })
-      } catch { /* skip */ }
-    }
-  }
+  if (!target || target.isConnected === false) return null
+  const found = scanFrameworkInstances(target, (obj) => {
+    if (typeof obj.txt?.html !== 'function' || !obj.$textElem) return false
+    const first = obj.$textElem.elems?.[0] ?? obj.$textElem[0]
+    return first === target && first.isConnected !== false
+  })
   return found.length === 1 ? found[0] : null
 }
 
@@ -110,11 +90,15 @@ function dataUrlToFile(win, source, name) {
   return new win.File([new win.Blob([bytes], { type })], `${name}.${ext}`, { type })
 }
 
-// 上传一张图：优先用 wangEditor 配置里的 customUploadImg；没有就按配置发 XHR。
 function uploadOne(win, nativeEditor, file, index, signal) {
   const config = nativeEditor.config ?? {}
   if (typeof config.customUploadImg !== 'function' && !config.uploadImgServer) {
     throw new Error('腾讯云市场：无法取得商品详情的图片上传配置，原文未改动')
+  }
+  const ext = file.name.split('.').pop().toLowerCase()
+  if (!file.size || (config.uploadImgMaxSize && file.size > config.uploadImgMaxSize)
+    || (Array.isArray(config.uploadImgAccept) && !config.uploadImgAccept.includes(ext))) {
+    throw new Error(`腾讯云市场：第 ${index + 1} 张图片不符合平台大小或格式限制，原文未改动`)
   }
   return new Promise((resolve, reject) => {
     let settled = false
@@ -127,44 +111,61 @@ function uploadOne(win, nativeEditor, file, index, signal) {
       if (error) {
         request?.abort()
         reject(error)
-      } else resolve(url)
+      } else {
+        resolve(url)
+      }
     }
     const onAbort = () => finish(new Error('页面已切换，已停止导入'))
     const fail = () => finish(new Error(`腾讯云市场：第 ${index + 1} 张图片上传失败，原文未改动；请重试`))
     const timer = win.setTimeout(() => finish(new Error(`腾讯云市场：第 ${index + 1} 张内嵌图片上传超时，原文未改动`)), UPLOAD_TIMEOUT_MS)
     signal?.addEventListener('abort', onAbort, { once: true })
-    // 只把回调交给上传器，不把 wangEditor 的插入函数交出去，避免过期回调插到错误位置。
     const receiveUrl = (source) => {
       if (settled) return
       const url = uploadedUrl(win, source)
       finish(url ? null : new Error('腾讯云市场：图片上传未返回有效地址，原文未改动'), url)
     }
     try {
+      if (signal?.aborted) { onAbort(); return }
       if (typeof config.customUploadImg === 'function') {
         config.customUploadImg([file], receiveUrl)?.catch?.(fail)
         return
       }
       const endpoint = new win.URL(config.uploadImgServer, win.location.href)
+      if (!/^https?:$/.test(endpoint.protocol)) { fail(); return }
       const body = new win.FormData()
       body.append(config.uploadFileName || file.name, file)
-      for (const [key, value] of Object.entries(config.uploadImgParams ?? {})) body.append(key, value)
+      for (const [key, value] of Object.entries(config.uploadImgParams ?? {})) {
+        body.append(key, value)
+        if (config.uploadImgParamsWithUrl) endpoint.searchParams.append(key, value)
+      }
+      const hooks = config.uploadImgHooks ?? {}
       request = new win.XMLHttpRequest()
       request.open('POST', endpoint.href)
       request.withCredentials = Boolean(config.withCredentials)
+      request.timeout = Math.min(config.uploadImgTimeout || UPLOAD_TIMEOUT_MS, UPLOAD_TIMEOUT_MS)
       for (const [key, value] of Object.entries(config.uploadImgHeaders ?? {})) request.setRequestHeader(key, value)
       request.onerror = fail
       request.ontimeout = fail
+      request.onabort = fail
       request.onload = () => {
+        if (settled) return
         try {
           if (request.status < 200 || request.status >= 300) return fail()
           const result = JSON.parse(request.responseText)
-          if (String(result.errno) === '0' && Array.isArray(result.data) && result.data.length === 1) {
+          if (typeof hooks.customInsert === 'function') {
+            hooks.customInsert(receiveUrl, result, nativeEditor)
+          } else if (String(result.errno) === '0' && Array.isArray(result.data) && result.data.length === 1) {
             receiveUrl(typeof result.data[0] === 'string' ? result.data[0] : result.data[0]?.url)
-          } else fail()
+            hooks.success?.(request, nativeEditor, result)
+          } else {
+            fail()
+          }
         } catch {
           fail()
         }
       }
+      const veto = hooks.before?.(request, nativeEditor, [file])
+      if (typeof veto === 'string' || veto === false || veto?.prevent) { fail(); return }
       request.send(body)
     } catch (error) {
       finish(error)
@@ -172,30 +173,37 @@ function uploadOne(win, nativeEditor, file, index, signal) {
   })
 }
 
-// 返回新的 HTML：data 图片全部上传后换成平台地址；上传失败整篇不写入。
-async function uploadEmbeddedImages(win, nativeEditor, html, signal) {
+async function uploadEmbeddedImages(win, nativeEditor, html, onProgress) {
   const doc = win.document.implementation.createHTMLDocument('')
   doc.body.innerHTML = html
-  let index = 0
-  for (const image of doc.querySelectorAll('img')) {
+  const images = [...doc.querySelectorAll('img')]
+  const uniqueSources = [...new Set(
+    images.map(img => img.getAttribute('src')?.trim() ?? '').filter(src => /^data:image\//i.test(src)),
+  )]
+  const uploaded = new Map()
+  for (const [i, source] of uniqueSources.entries()) {
+    onProgress?.(`上传图片 ${i + 1}/${uniqueSources.length}…`)
+    const file = dataUrlToFile(win, source, `draftferry-${i + 1}`)
+    uploaded.set(source, await uploadOne(win, nativeEditor, file, i, null))
+  }
+  for (const image of images) {
     const source = image.getAttribute('src')?.trim() ?? ''
     if (/^data:image\//i.test(source)) {
-      const url = await uploadOne(win, nativeEditor, dataUrlToFile(win, source, `draftferry-${index + 1}`), index, signal)
-      image.setAttribute('src', url)
+      image.setAttribute('src', uploaded.get(source))
     } else if (!uploadedUrl(win, source)) {
       throw new Error('腾讯云市场：图片缺少有效地址，原文未改动')
     }
-    index += 1
   }
   return doc.body.innerHTML
 }
 
-function signature(html) {
-  const doc = new DOMParser().parseFromString(`<body>${html}`, 'text/html')
+function signature(doc, html) {
+  const container = doc.createElement('div')
+  container.innerHTML = html
   return JSON.stringify({
-    text: squash(doc.body.textContent),
-    images: [...doc.querySelectorAll('img')].map(img => img.getAttribute('src')),
-    structure: [...doc.querySelectorAll('h1,h2,h3,h4,h5,h6,table,tr,th,td,pre,ul,ol,li')].map(el => el.tagName),
+    text: squash(container.textContent),
+    images: [...container.querySelectorAll('img')].map(img => img.getAttribute('src')),
+    structure: [...container.querySelectorAll('h1,h2,h3,h4,h5,h6,table,tr,th,td,pre,ul,ol,li')].map(el => el.tagName),
   })
 }
 
@@ -218,17 +226,24 @@ export default {
     if (!nativeEditor) throw new Error('腾讯云市场：无法确认商品详情的编辑器接口，原文未改动')
     return {
       getText: () => editor.textContent ?? '',
-      async setHTML(html) {
+      async setHTML(html, { onProgress } = {}) {
         const previous = editor.innerHTML
-        const prepared = await uploadEmbeddedImages(win, nativeEditor, html, null)
+        const prepared = await uploadEmbeddedImages(win, nativeEditor, html, onProgress)
         if (editor.innerHTML !== previous) throw new Error('腾讯云市场：上传期间正文发生变化，已停止导入；请重试')
+        onProgress?.('写入正文…')
         try {
           nativeEditor.txt.html(prepared)
-          if (signature(nativeEditor.txt.html()) !== signature(prepared)) throw new Error('腾讯云市场：正文写入不完整，已恢复原文')
+          if (signature(doc, nativeEditor.txt.html()) !== signature(doc, prepared)) {
+            throw new Error('腾讯云市场：正文写入不完整，已恢复原文')
+          }
           if (typeof nativeEditor.change === 'function') nativeEditor.change()
         } catch (error) {
-          nativeEditor.txt.html(previous)
-          if (typeof nativeEditor.change === 'function') nativeEditor.change()
+          try {
+            nativeEditor.txt.html(previous)
+            if (typeof nativeEditor.change === 'function') nativeEditor.change()
+          } catch (restoreError) {
+            throw new AggregateError([error, restoreError], '腾讯云市场：无法恢复原文，请刷新页面且不要保存', { cause: restoreError })
+          }
           throw error
         }
       },

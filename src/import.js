@@ -2,14 +2,13 @@ import { detectPlatform } from './platforms/index.js'
 
 const MD_PATTERN = /\.(md|markdown)$/i
 
-// 一次导入：选平台 → 读 Markdown → 转换 → 写正文 → 写标题。
-// 每次都重新找编辑器，所以连着导第二篇、第三篇不用刷新。
-// probe 记下平台、编辑器和标题框找没找到，出错时给诊断用。
-export async function runImport({ pageWindow, url, files, text, buildArticle, probe = {} }) {
+export async function runImport({ pageWindow, url, files, text, buildArticle, onProgress, probe = {} }) {
+  probe.stage = 'detect'
   const platform = detectPlatform(url)
   probe.platformId = platform?.id ?? null
   if (!platform) throw new Error('当前页面不是稿渡支持的编辑页，请先进入文章编辑页')
 
+  probe.stage = 'read'
   const mdFile = files.find(file => MD_PATTERN.test(file.name))
   let markdown
   let fallbackTitle = ''
@@ -19,9 +18,10 @@ export async function runImport({ pageWindow, url, files, text, buildArticle, pr
   } else if (text?.trim()) {
     markdown = text
   } else {
-    throw new Error('先把 .md 文件拖进来，或把 Markdown 粘贴到输入框里')
+    throw new Error('请先拖入 .md 文件，或粘贴 Markdown 文本')
   }
 
+  probe.stage = 'editor'
   const doc = pageWindow.document
   const titleControl = platform.findTitle(doc)
   probe.titleFound = Boolean(titleControl)
@@ -34,13 +34,20 @@ export async function runImport({ pageWindow, url, files, text, buildArticle, pr
   }
   probe.editorFound = true
 
+  probe.stage = 'parse'
+  onProgress?.('解析 Markdown…')
   const images = new Map(files.filter(file => file !== mdFile).map(file => [file.name, file]))
-  const article = await buildArticle(markdown, { fallbackTitle, files: images })
-  await editor.setHTML(article.html, { markdown: article.markdown })
+  const article = await buildArticle(markdown, { fallbackTitle, files: images, onProgress })
+
+  probe.stage = 'inject'
+  await editor.setHTML(article.html, { markdown: article.markdown, onProgress })
+
   if (article.title && titleControl && platform.writeTitle) {
+    probe.stage = 'title'
     platform.writeTitle(pageWindow, titleControl, article.title)
   }
 
+  probe.stage = 'done'
   return {
     platformName: platform.name,
     title: article.title,

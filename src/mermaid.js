@@ -6,6 +6,15 @@ async function loadMermaid() {
   return module.default
 }
 
+function hashSource(text) {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${text.length}:${hash >>> 0}`
+}
+
 function svgSize(svgElement) {
   const viewBox = (svgElement.getAttribute('viewBox') ?? '').trim().split(/[ ,]+/).map(Number)
   if (viewBox.length === 4 && viewBox[2] > 0 && viewBox[3] > 0) {
@@ -14,10 +23,12 @@ function svgSize(svgElement) {
   const width = Number.parseFloat(svgElement.getAttribute('width'))
   const height = Number.parseFloat(svgElement.getAttribute('height'))
   if (width > 0 && height > 0) return { width, height }
+  const styleWidth = Number.parseFloat(svgElement.style?.maxWidth || svgElement.style?.width)
+  const styleHeight = Number.parseFloat(svgElement.style?.maxHeight || svgElement.style?.height)
+  if (styleWidth > 0 && styleHeight > 0) return { width: styleWidth, height: styleHeight }
   throw new Error('Mermaid 图尺寸为空')
 }
 
-// SVG → 2 倍分辨率白底 PNG。
 async function svgToPng(svg) {
   const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml')
   const svgElement = parsed.documentElement
@@ -26,7 +37,8 @@ async function svgToPng(svg) {
   svgElement.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
   svgElement.setAttribute('width', String(width))
   svgElement.setAttribute('height', String(height))
-  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(svgElement))}`
+  const serialized = new XMLSerializer().serializeToString(svgElement)
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`
 
   const image = new Image()
   image.src = url
@@ -47,6 +59,7 @@ async function svgToPng(svg) {
 export function createMermaidRenderer(load = loadMermaid) {
   let ready = null
   let sequence = 0
+  const cache = new Map()
 
   const getMermaid = () => {
     ready ??= load().then((mermaid) => {
@@ -66,6 +79,8 @@ export function createMermaidRenderer(load = loadMermaid) {
   }
 
   return async function renderMermaidPng(source) {
+    const key = hashSource(source)
+    if (cache.has(key)) return cache.get(key)
     const mermaid = await getMermaid()
     sequence += 1
     let svg
@@ -74,6 +89,8 @@ export function createMermaidRenderer(load = loadMermaid) {
     } catch (error) {
       throw new Error(`Mermaid 语法错误：${error?.message || error}`, { cause: error })
     }
-    return svgToPng(svg)
+    const png = await svgToPng(svg)
+    cache.set(key, png)
+    return png
   }
 }

@@ -1,7 +1,6 @@
 import { squash, waitMs } from '../dom.js'
 import { hostMatches } from './shared.js'
 
-// 阿里云市场：只写“产品详情”这一个 CKEditor 字段，图片由平台上传。DOM 事实来自 legacy/src/adapters/aliyun-market.js。
 const LABELS = ['产品详情', '商品详情']
 const UPLOAD_TIMEOUT_MS = 30_000
 
@@ -25,13 +24,32 @@ export function findAliyunDetailEditor(doc, win) {
   return editor
 }
 
-function imageSources(html) {
-  const doc = new DOMParser().parseFromString(`<body>${html}`, 'text/html')
-  return [...doc.querySelectorAll('img')].map(img => img.getAttribute('src')?.trim() ?? '')
+function imageSources(doc, html) {
+  const container = doc.createElement('div')
+  container.innerHTML = html
+  return [...container.querySelectorAll('img')].map(img => img.getAttribute('src')?.trim() ?? '')
 }
 
-// 等 CKEditor 的上传回调数量够了；任何一张失败就报错。
-function observeUploads(win, editor, expected, signal) {
+function setCkEditorData(win, editor, html) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error) => {
+      if (settled) return
+      settled = true
+      win.clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    const timer = win.setTimeout(() => finish(new Error('阿里云市场：恢复原产品详情超时')), 5000)
+    try {
+      editor.setData(html, { callback: () => finish() })
+    } catch (error) {
+      finish(error)
+    }
+  })
+}
+
+function observeUploads(win, editor, expected, onProgress) {
   if (expected === 0) return { promise: Promise.resolve(), cancel() {} }
   let cancel = () => {}
   const promise = new Promise((resolve, reject) => {
@@ -41,13 +59,11 @@ function observeUploads(win, editor, expected, signal) {
       if (settled) return
       settled = true
       win.clearTimeout(timer)
-      editor.removeListener('fileUploadResponse', onResponse)
-      signal?.removeEventListener('abort', onAbort)
+      editor.removeListener?.('fileUploadResponse', onResponse)
       if (error) reject(error)
       else resolve()
     }
     cancel = () => finish()
-    const onAbort = () => finish(new DOMException('已停止导入', 'AbortError'))
     const onResponse = (event) => {
       const status = event?.data?.fileLoader?.xhr?.status
       const message = event?.data?.message
@@ -56,12 +72,11 @@ function observeUploads(win, editor, expected, signal) {
         return
       }
       completed += 1
+      onProgress?.(`上传图片 ${completed}/${expected}…`)
       if (completed >= expected) finish()
     }
     const timer = win.setTimeout(() => finish(new Error('阿里云市场：图片上传响应超时')), UPLOAD_TIMEOUT_MS)
     editor.on('fileUploadResponse', onResponse)
-    if (signal?.aborted) onAbort()
-    else signal?.addEventListener('abort', onAbort, { once: true })
   })
   return { promise, cancel }
 }
@@ -76,7 +91,6 @@ export default {
       && /^\/msp\/commodity\/list\/~\/publish\/basic\/?$/.test(url.pathname)
       && Boolean(url.searchParams.get('commodityId'))
   },
-  // 阿里云市场没有标题字段。
   findTitle() {
     return null
   },
@@ -84,12 +98,15 @@ export default {
     const editor = findAliyunDetailEditor(doc, win)
     return {
       getText: () => editor.getData() ?? '',
-      async setHTML(html) {
-        const embedded = imageSources(html).filter(source => /^data:image\//i.test(source)).length
-        const observation = observeUploads(win, editor, embedded, null)
+      async setHTML(html, { onProgress } = {}) {
+        const previous = editor.getData() ?? ''
+        const embedded = imageSources(doc, html).filter(source => /^data:image\//i.test(source)).length
+        if (embedded > 0) onProgress?.(`上传图片 0/${embedded}…`)
+        else onProgress?.('写入正文…')
+        const observation = observeUploads(win, editor, embedded, onProgress)
         try {
           editor.focus?.()
-          // 不用 setData('')：它会重建 iframe，让已锁定的编辑区失效。改走 CKEditor 自己的粘贴流水线。
+          // 走 CKEditor 原生选区 + paste 整篇替换，避免 setData 重建 iframe。
           const range = editor.createRange()
           range.selectNodeContents(editor.editable())
           editor.getSelection().selectRanges([range])
@@ -97,17 +114,25 @@ export default {
           await observation.promise
           const deadline = Date.now() + UPLOAD_TIMEOUT_MS
           while (embedded > 0 && Date.now() < deadline) {
-            const pending = imageSources(editor.getData() ?? '').some(source => /^(?:data:image\/|blob:)/i.test(source))
+            const pending = imageSources(doc, editor.getData() ?? '').some(src => /^(?:data:image\/|blob:)/i.test(src))
             if (!pending) break
             await waitMs(win, 100)
+          }
+          if (embedded > 0 && imageSources(doc, editor.getData() ?? '').some(src => /^(?:data:image\/|blob:)/i.test(src))) {
+            throw new Error('阿里云市场：内嵌图片未完成平台上传')
+          }
+          if (squash(editor.getData() ?? '').length === 0 && squash(html).length > 0) {
+            throw new Error('阿里云市场：产品详情写入后为空，已恢复原稿')
           }
         } catch (error) {
           observation.cancel()
           for (const loader of Object.values(editor.uploadRepository?.loaders ?? {})) loader.abort?.()
+          try {
+            await setCkEditorData(win, editor, previous)
+          } catch (restoreError) {
+            throw new AggregateError([error, restoreError], '阿里云市场：导入失败且无法恢复原产品详情；请刷新页面且不要保存', { cause: restoreError })
+          }
           throw error
-        }
-        if (squash(editor.getData() ?? '').length === 0 && squash(html).length > 0) {
-          throw new Error('阿里云市场：产品详情写入后为空，已停下')
         }
       },
     }
