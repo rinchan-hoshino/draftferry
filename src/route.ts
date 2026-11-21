@@ -1,33 +1,34 @@
-// SPA 无刷新路由监听：优先 Navigation API 与油猴 onurlchange，兜底仅在页面可见时轻量轮询。
-export function observeRoute(win, onChange) {
+// SPA route listener: prefers Navigation API and Tampermonkey onurlchange,
+// falling back to lightweight polling only when the page is visible.
+export function observeRoute(win: Window, onChange: (url: string) => void): () => void {
   const doc = win.document
-  const navigation = win.navigation
+  const navigation = (win as unknown as { navigation?: EventTarget }).navigation
   const hasNavigation = typeof navigation?.addEventListener === 'function'
   const hasUrlChange = 'onurlchange' in win
   const needsFallback = !hasNavigation && !hasUrlChange
-  const cleanups = []
+  const cleanups: Array<() => void> = []
   let previousUrl = win.location.href
-  let timer = null
+  let timer: number | null = null
   let suspended = false
 
-  function listen(target, name, handler) {
+  function listen(target: EventTarget, name: string, handler: EventListener): void {
     target.addEventListener(name, handler)
     cleanups.push(() => target.removeEventListener(name, handler))
   }
 
-  function check() {
+  function check(): void {
     const url = win.location.href
     if (url === previousUrl) return
     previousUrl = url
     onChange(url)
   }
 
-  function stopTimer() {
+  function stopTimer(): void {
     if (timer !== null) win.clearInterval(timer)
     timer = null
   }
 
-  function resume() {
+  function resume(): void {
     if (suspended || doc.hidden) {
       stopTimer()
       return
@@ -36,13 +37,19 @@ export function observeRoute(win, onChange) {
     if (needsFallback && timer === null) timer = win.setInterval(check, 750)
   }
 
-  if (hasNavigation) listen(navigation, 'currententrychange', check)
+  if (hasNavigation && navigation) listen(navigation, 'currententrychange', check)
   if (hasUrlChange) listen(win, 'urlchange', check)
   listen(win, 'popstate', check)
   listen(win, 'hashchange', check)
   listen(doc, 'visibilitychange', resume)
-  listen(win, 'pagehide', () => { suspended = true; stopTimer() })
-  listen(win, 'pageshow', () => { suspended = false; resume() })
+  listen(win, 'pagehide', () => {
+    suspended = true
+    stopTimer()
+  })
+  listen(win, 'pageshow', () => {
+    suspended = false
+    resume()
+  })
   resume()
 
   return () => {

@@ -1,16 +1,35 @@
-import { detectPlatform } from './platforms/index.js'
+import { detectPlatform } from './platforms/index.ts'
+import type { ArticleBuilder, ImportProbe, ImportResult, ProgressCallback } from './types.ts'
 
 const MD_PATTERN = /\.(md|markdown)$/i
 
-export async function runImport({ pageWindow, url, files, text, buildArticle, onProgress, probe = {} }) {
+export interface RunImportOptions {
+  pageWindow: Window
+  url: URL | string
+  files: File[]
+  text?: string
+  buildArticle: ArticleBuilder
+  onProgress?: ProgressCallback
+  probe?: ImportProbe
+}
+
+export async function runImport({
+  pageWindow,
+  url,
+  files,
+  text,
+  buildArticle,
+  onProgress,
+  probe = {},
+}: RunImportOptions): Promise<ImportResult> {
   probe.stage = 'detect'
   const platform = detectPlatform(url)
   probe.platformId = platform?.id ?? null
-  if (!platform) throw new Error('当前页面不是稿渡支持的编辑页，请先进入文章编辑页')
+  if (!platform) throw new Error('当前页面不是 Folio 支持的编辑页，请先进入文章编辑页')
 
   probe.stage = 'read'
-  const mdFile = files.find(file => MD_PATTERN.test(file.name))
-  let markdown
+  const mdFile = files.find((file) => MD_PATTERN.test(file.name))
+  let markdown: string
   let fallbackTitle = ''
   if (mdFile) {
     markdown = await mdFile.text()
@@ -36,7 +55,7 @@ export async function runImport({ pageWindow, url, files, text, buildArticle, on
 
   probe.stage = 'parse'
   onProgress?.('解析 Markdown…')
-  const images = new Map(files.filter(file => file !== mdFile).map(file => [file.name, file]))
+  const images = new Map(files.filter((file) => file !== mdFile).map((file) => [file.name, file]))
   const article = await buildArticle(markdown, { fallbackTitle, files: images, onProgress })
 
   probe.stage = 'inject'

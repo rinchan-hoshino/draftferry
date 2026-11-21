@@ -1,19 +1,16 @@
 # 更新记录
 
-## 1.0.0
+## 2.0.0（更名为 Folio）
 
-白纸重做架构、编辑器适配与悬浮面板：
+按现代前端工程栈彻底白纸重做并更名为 **Folio**：
 
-- **解析引擎**：改用 `marked.lexer()` Token 遍历提取标题、图片引用与 Mermaid 代码块，不再误伤代码块或行内代码里的 `![alt](foo.png)`，同时支持 ```` ```mermaid ```` 和 `~~~mermaid`。
-- **路由显隐**：接入 Navigation API、Tampermonkey `onurlchange` 与可见态兜底，仅在八个平台的真实编辑页挂载入口，离开编辑页自动卸载。
-- **编辑器适配修复**：
-  - 腾讯云市场：恢复 React Fiber 与 Vue 组件图扫描以定位 wangEditor 3.x/4.x，补全 `uploadImgHooks`（`before` / `customInsert`）与同名图片去重上传。
-  - 搜狐号：改用直接属性读取 `root` / `clipboard`，绕过油猴沙箱 Proxy 对属性描述符的隐藏。
-  - 阿里云市场：补充上传失败时的 `setData` 原稿回滚与实时上传进度。
-  - 全部八个平台统一接入阶段进度回调。
-- **面板重设计**：Shadow DOM 隔离，支持系统深浅色自适应与右侧中部默认停靠；支持拖拽与方向键微调、按站点记住坐标、多次追加合并文件与单项移除、折叠粘贴区与面板内直接粘贴、Esc 与点击外部关闭。
-- **仓库整理**：移除 `legacy/` 与空 `docs/` 目录，精简诊断信息字段并脱敏 URL 参数。
+- **工程与构建**：全仓迁移为严格 `TypeScript` + `Vite` + `vite-plugin-monkey`，移除旧版手搓 `scripts/build.js` 与油猴 `@updateURL` / `@downloadURL`；产物固定为 `dist/folio.user.js`（体积瘦身至 `< 280 KB`），并将外置 `mermaid.min.js` 同步输出至 `dist/vendor/mermaid.min.js`。
+- **unified 双路 AST 引擎**：彻底废除 `marked` 脏标记字符串切片，改用 `unified` + `remark-parse` + `remark-gfm` + `remark-stringify` + `remark-rehype` + `rehype-sanitize` + `rehype-stringify`，保证代码块与嵌套排版 100% 无损，同时严格拦截 XSS 载荷。
+- **公众号语法高亮与主题**：新增轻量多语言语法高亮器，为公众号代码块输出行内 token 配色，保留二级标题左金线与末尾保底空段。
+- **Mermaid 按需懒加载**：日常打开编辑页 0 字节加载 Mermaid；仅当文稿含 `mermaid` 代码块时通过 `GM_xmlhttpRequest` 按需拉取外置脚本渲染 2x 白底 PNG。
+- **Preact Shadow DOM 面板**：使用 `Preact` JSX 重构可拖拽胶囊与导入卡片，保留多次追加、同名去重、粘贴导入与脱敏诊断导出。
+- **三道验证门禁**：`npm run check` 一键串联 `tsc --noEmit`、ESLint 零警告、`Vitest` 单元与 AST 属性轰炸测试、以及真实 Chrome 无头黑盒 E2E。
 
-## 0.4.x – 0.7.2
+## 1.0.0（DraftFerry 稿渡）
 
-- 早期迭代版本，逐步验证各平台编辑器写入方式、Mermaid 转 2x 白底 PNG 及悬浮面板交互。
+- 早期 JS/esbuild 版本，完成 8 大内容平台编辑器适配、SPA 路由监听与 Shadow DOM 悬浮面板。

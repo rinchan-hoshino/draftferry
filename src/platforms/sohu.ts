@@ -1,31 +1,42 @@
-import { isUsable, setControlValue, assertReadBack } from '../dom.js'
-import { hostMatches } from './shared.js'
+import { assertReadBack, isUsable, setControlValue } from '../dom.ts'
+import type { PlatformAdapter } from '../types.ts'
+import { hostMatches } from './shared.ts'
 
 const TITLE_SELECTOR = 'input[placeholder*="标题"]'
 
-function findSohuEditor(doc) {
-  const editors = [...doc.querySelectorAll('.ql-editor')].filter(isUsable)
-  const editable = editors.filter(editor => editor.getAttribute('contenteditable') === 'true')
-  const candidates = editable.length ? editable : editors
-  return candidates.sort((left, right) => {
-    const l = left.getBoundingClientRect()
-    const r = right.getBoundingClientRect()
-    return (r.width * r.height) - (l.width * l.height)
-  })[0] ?? null
+export interface QuillApi {
+  quill: Record<string, unknown>
+  clipboard: Record<string, unknown>
+  getContents: () => unknown
+  setContents: (delta: unknown, source?: string) => void
+  pasteHtml: (html: string, source?: string) => void
 }
 
-function safeRead(object, name) {
+function findSohuEditor(doc: Document): HTMLElement | null {
+  const editors = [...doc.querySelectorAll<HTMLElement>('.ql-editor')].filter(isUsable)
+  const editable = editors.filter((editor) => editor.getAttribute('contenteditable') === 'true')
+  const candidates = editable.length ? editable : editors
+  return (
+    candidates.sort((left, right) => {
+      const l = left.getBoundingClientRect()
+      const r = right.getBoundingClientRect()
+      return r.width * r.height - l.width * l.height
+    })[0] ?? null
+  )
+}
+
+function safeRead(object: unknown, name: string): unknown {
   if (!object || (typeof object !== 'object' && typeof object !== 'function')) return undefined
   try {
-    return object[name]
+    return (object as Record<string, unknown>)[name]
   } catch {
     return undefined
   }
 }
 
-function validatedQuillApi(candidate, editor) {
+function validatedQuillApi(candidate: unknown, editor: Element): QuillApi | null {
   if (!candidate || typeof candidate !== 'object') return null
-  // 直接属性读取兼容 Tampermonkey unsafeWindow Proxy，避免 getOwnPropertyDescriptor 返回 undefined。
+  // Direct property read bypasses Tampermonkey unsafeWindow Proxy descriptor hiding
   const root = safeRead(candidate, 'root')
   const clipboard = safeRead(candidate, 'clipboard')
   const getContents = safeRead(candidate, 'getContents')
@@ -33,18 +44,28 @@ function validatedQuillApi(candidate, editor) {
   const setContents = safeRead(candidate, 'setContents')
   const pasteHtml = safeRead(clipboard, 'dangerouslyPasteHTML')
   if (root !== editor) return null
-  if ([getContents, getLength, setContents, pasteHtml].some(fn => typeof fn !== 'function')) return null
-  return { quill: candidate, clipboard, getContents, setContents, pasteHtml }
+  if ([getContents, getLength, setContents, pasteHtml].some((fn) => typeof fn !== 'function')) {
+    return null
+  }
+  return {
+    quill: candidate as Record<string, unknown>,
+    clipboard: clipboard as Record<string, unknown>,
+    getContents: getContents as () => unknown,
+    setContents: setContents as (delta: unknown, source?: string) => void,
+    pasteHtml: pasteHtml as (html: string, source?: string) => void,
+  }
 }
 
-export function getSohuQuill(editor) {
-  const found = new Set()
-  const seen = new Set()
-  let element = editor
+export function getSohuQuill(editor: Element): QuillApi | null {
+  const found = new Set<Record<string, unknown>>()
+  const seen = new Set<unknown>()
+  let element: Element | null = editor
   for (let depth = 0; element && depth <= 16; depth += 1) {
     let component = safeRead(element, '__vue__')
     for (let compDepth = 0; component && compDepth <= 32; compDepth += 1) {
-      if ((typeof component !== 'object' && typeof component !== 'function') || seen.has(component)) break
+      if ((typeof component !== 'object' && typeof component !== 'function') || seen.has(component)) {
+        break
+      }
       seen.add(component)
       const data = safeRead(component, '_data')
       const candidate = safeRead(data, 'quill') ?? safeRead(component, 'quill')
@@ -60,10 +81,10 @@ export function getSohuQuill(editor) {
   return validatedQuillApi([...found][0], editor)
 }
 
-export function prepareSohuHtml(doc, html) {
+export function prepareSohuHtml(doc: Document, html: string): string {
   const container = doc.createElement('div')
   container.innerHTML = html
-  // 搜狐粘贴会把 H3–H6 压平。正文 H1 通常已取作标题，无 H1 时将 H2/H3 降级映射为 H1/H2。
+  // Sohu paste flattens H3-H6; remap H2/H3 to H1/H2 when no H1 exists.
   const offset = container.querySelector('h1') ? 0 : 1
   for (const heading of container.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     const level = Number(heading.tagName[1]) - offset
@@ -81,32 +102,41 @@ export function prepareSohuHtml(doc, html) {
     table.setAttribute('cellspacing', '0')
     table.style.setProperty('border-collapse', 'collapse', 'important')
     table.style.setProperty('border-spacing', '0px', 'important')
-    // 清理表格内空白文本节点，防 Quill 2.0.3 将空白变成段落导致拆表。
-    for (const element of [table, ...table.querySelectorAll('thead, tbody, tfoot, tr, colgroup')]) {
+    // Strip whitespace text nodes inside tables to prevent Quill 2.0.3 splitting tables into paragraphs.
+    for (const element of [
+      table,
+      ...table.querySelectorAll('thead, tbody, tfoot, tr, colgroup'),
+    ]) {
       for (const node of [...element.childNodes]) {
-        if (node.nodeType === 3 && node.nodeValue.trim() === '') node.remove()
+        if (node.nodeType === 3 && (node.nodeValue ?? '').trim() === '') node.remove()
       }
     }
   }
   return container.innerHTML
 }
 
-function cloneDelta(win, delta) {
+function cloneDelta(win: Window, delta: unknown): unknown {
   try {
-    if (typeof win.structuredClone === 'function') return win.structuredClone(delta)
-  } catch { /* fallback to JSON clone for proxied objects */ }
+    const structuredCloneFn = (win as unknown as { structuredClone?: <T>(v: T) => T }).structuredClone
+    if (typeof structuredCloneFn === 'function') return structuredCloneFn(delta)
+  } catch {
+    /* fallback to JSON clone for proxied objects */
+  }
   return JSON.parse(JSON.stringify(delta))
 }
 
-export default {
+const sohu: PlatformAdapter = {
   id: 'sohu',
   name: '搜狐号',
   hosts: ['mp.sohu.com'],
   match(url) {
-    return hostMatches(url, this.hosts) && /^\/mpfe\/v4\/contentManagement\/news\/addarticle\/?$/.test(url.pathname)
+    return (
+      hostMatches(url, this.hosts) &&
+      /^\/mpfe\/v4\/contentManagement\/news\/addarticle\/?$/.test(url.pathname)
+    )
   },
   findTitle(doc) {
-    return doc.querySelector(TITLE_SELECTOR)
+    return doc.querySelector<HTMLElement>(TITLE_SELECTOR)
   },
   findEditor(doc, win) {
     const editor = findSohuEditor(doc)
@@ -126,7 +156,11 @@ export default {
           try {
             api.setContents.call(api.quill, previous, 'user')
           } catch (restoreError) {
-            throw new AggregateError([error, restoreError], '搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存', { cause: restoreError })
+            throw new AggregateError(
+              [error, restoreError],
+              '搜狐：写入失败且无法恢复原内容；请刷新页面且不要保存',
+              { cause: restoreError },
+            )
           }
           throw error
         }
@@ -135,3 +169,5 @@ export default {
   },
   writeTitle: (win, control, title) => setControlValue(win, control, title),
 }
+
+export default sohu

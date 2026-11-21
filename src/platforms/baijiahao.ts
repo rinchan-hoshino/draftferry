@@ -1,5 +1,6 @@
-import { queryFirst, writeTitleControl, assertReadBack } from '../dom.js'
-import { hostMatches } from './shared.js'
+import { assertReadBack, queryFirst, writeTitleControl } from '../dom.ts'
+import type { PlatformAdapter } from '../types.ts'
+import { hostMatches } from './shared.ts'
 
 const TITLE_SELECTORS = [
   '.client_components_titleInput [contenteditable="true"]',
@@ -7,16 +8,34 @@ const TITLE_SELECTORS = [
   '[class*="titleInput"] [contenteditable="true"]',
 ]
 
-export function findLiveEditor(pageWindow) {
-  const instants = pageWindow?.UE_V2?.instants ?? {}
+export interface UEditorInstance {
+  getContent: () => string
+  setContent: (html: string) => void
+  fireEvent?: (name: string) => void
+  body?: { isConnected?: boolean }
+  iframe?: { isConnected?: boolean }
+}
+
+export function findLiveEditor(pageWindow: Window): UEditorInstance | null {
+  const instants =
+    (pageWindow as unknown as { UE_V2?: { instants?: Record<string, UEditorInstance> } }).UE_V2
+      ?.instants ?? {}
   const live = Object.entries(instants)
-    .filter(([, editor]) => typeof editor?.getContent === 'function' && typeof editor?.setContent === 'function')
-    .filter(([, editor]) => editor.body?.isConnected !== false && editor.iframe?.isConnected !== false)
-    .sort(([a], [b]) => (Number(a.match(/\d+$/)?.[0] ?? -1) - Number(b.match(/\d+$/)?.[0] ?? -1)))
+    .filter(
+      ([, editor]) =>
+        typeof editor?.getContent === 'function' && typeof editor?.setContent === 'function',
+    )
+    .filter(
+      ([, editor]) => editor.body?.isConnected !== false && editor.iframe?.isConnected !== false,
+    )
+    .sort(
+      ([a], [b]) =>
+        Number(a.match(/\d+$/)?.[0] ?? -1) - Number(b.match(/\d+$/)?.[0] ?? -1),
+    )
   return live.at(-1)?.[1] ?? null
 }
 
-export default {
+const baijiahao: PlatformAdapter = {
   id: 'baijiahao',
   name: '百家号',
   hosts: ['baijiahao.baidu.com'],
@@ -26,7 +45,7 @@ export default {
   findTitle(doc) {
     return queryFirst(doc, TITLE_SELECTORS)
   },
-  findEditor(doc, win) {
+  findEditor(_doc, win) {
     const editor = findLiveEditor(win)
     if (!editor) throw new Error('没找到正在编辑的正文，请确认页面是百家号图文编辑页')
     return {
@@ -42,3 +61,5 @@ export default {
   },
   writeTitle: writeTitleControl,
 }
+
+export default baijiahao

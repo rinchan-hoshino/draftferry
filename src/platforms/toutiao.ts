@@ -1,7 +1,8 @@
-import { queryFirst, setControlValue, assertReadBack } from '../dom.js'
-import { hostMatches } from './shared.js'
+import { assertReadBack, queryFirst, setControlValue } from '../dom.ts'
+import type { PlatformAdapter } from '../types.ts'
+import { hostMatches } from './shared.ts'
 
-export default {
+const toutiao: PlatformAdapter = {
   id: 'toutiao',
   name: '今日头条',
   hosts: ['toutiao.com'],
@@ -18,7 +19,9 @@ export default {
       getText: () => editor.textContent ?? '',
       setHTML(html, { onProgress } = {}) {
         onProgress?.('写入正文…')
-        if (typeof doc.execCommand !== 'function') throw new Error('今日头条：浏览器不支持 insertHTML 编辑命令')
+        if (typeof doc.execCommand !== 'function') {
+          throw new Error('今日头条：浏览器不支持 insertHTML 编辑命令')
+        }
         const container = doc.createElement('div')
         container.innerHTML = html
         for (const image of container.querySelectorAll('img')) {
@@ -29,14 +32,24 @@ export default {
         const range = doc.createRange()
         range.selectNodeContents(editor)
         const selection = win.getSelection()
-        selection.removeAllRanges()
-        selection.addRange(range)
-        if (!doc.execCommand('insertHTML', false, container.innerHTML)) throw new Error('今日头条：编辑器拒绝 insertHTML')
-        editor.dispatchEvent(new win.InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }))
-        editor.dispatchEvent(new win.Event('change', { bubbles: true }))
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        if (!doc.execCommand('insertHTML', false, container.innerHTML)) {
+          throw new Error('今日头条：编辑器拒绝 insertHTML')
+        }
+        const winTyped = win as unknown as {
+          InputEvent: typeof InputEvent
+          Event: typeof Event
+        }
+        editor.dispatchEvent(
+          new winTyped.InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }),
+        )
+        editor.dispatchEvent(new winTyped.Event('change', { bubbles: true }))
         assertReadBack(html, editor.innerHTML)
       },
     }
   },
   writeTitle: (win, control, title) => setControlValue(win, control, title),
 }
+
+export default toutiao

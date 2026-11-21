@@ -1,7 +1,8 @@
-import { queryFirst, setControlValue, assertReadBack } from '../dom.js'
-import { hostMatches } from './shared.js'
+import { assertReadBack, queryFirst, setControlValue } from '../dom.ts'
+import type { PlatformAdapter } from '../types.ts'
+import { hostMatches } from './shared.ts'
 
-export default {
+const oschina: PlatformAdapter = {
   id: 'oschina',
   name: '开源中国',
   hosts: ['oschina.net'],
@@ -21,7 +22,7 @@ export default {
     if (!textarea) throw new Error('开源中国：未找到 Markdown 编辑器')
     return {
       getText: () => textarea.value,
-      setHTML(_html, { markdown, onProgress } = {}) {
+      setHTML(_html, { markdown = '', onProgress } = {}) {
         onProgress?.('写入正文…')
         setControlValue(win, textarea, markdown)
         assertReadBack(markdown, textarea.value)
@@ -30,3 +31,5 @@ export default {
   },
   writeTitle: (win, control, title) => setControlValue(win, control, title),
 }
+
+export default oschina
