@@ -1,6 +1,6 @@
 {
   "name": "folio-userscript",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "Folio：把 Markdown、本地图片与 Mermaid 图一键导入八大内容平台编辑页的油猴脚本",
   "scripts": {
     "dev": "vite",
