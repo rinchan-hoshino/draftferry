@@ -154,8 +154,9 @@ button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent);
 }
 
 .status {
-  padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.45;
+  padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
   background: var(--bg-soft); color: var(--text-sub); word-break: break-word;
+  white-space: pre-line;
 }
 .status.ok { background: var(--ok-bg); color: var(--ok-text); }
 .status.warn { background: var(--warn-bg); color: var(--warn-text); }
@@ -364,7 +365,7 @@ function PanelApp({ host, doc, initialPlatform, run, onReady }: PanelAppProps) {
             : ''
     const prefix = kind === 'ok' ? '✓ ' : ''
     const message = hasWarnings
-      ? `${prefix}${outcome.text}（${outcome.warnings!.join('；')}）`
+      ? `${prefix}${outcome.text}\n${outcome.warnings!.join('\n')}`
       : `${prefix}${outcome.text}`
     setStatus(message, kind)
     setDiagnostic(outcome.diagnostic ?? '')

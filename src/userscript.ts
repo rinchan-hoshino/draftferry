@@ -30,7 +30,7 @@ function warningsOf(result: ImportResult): string[] {
   if (result.titleMissing) warnings.push('未找到标题框，标题未填')
   if (result.missing.length) warnings.push(`缺少图片：${result.missing.join('、')}，已留占位`)
   if (result.mermaidErrors.length) {
-    warnings.push(`${result.mermaidErrors.length} 个 Mermaid 图渲染失败，已保留代码块`)
+    warnings.push(...result.mermaidErrors, '渲染失败的图表已保留原代码块')
   }
   return warnings
 }

@@ -54,15 +54,35 @@ describe('platforms', () => {
     }
   })
 
-  it('wechat wraps headings with span > strong and appends trailing editable paragraph', () => {
+  it('wechat applies editorial paper theme, wraps headings with span > strong, and appends trailing editable paragraph', () => {
     const { window } = new JSDOM('')
     const out = prepareWechatHtml(
       window.document,
-      '<h2>标题</h2><pre><code class="language-ts"><span class="hljs-keyword">const</span> x: number = 42</code></pre><table><tr><td>a</td></tr></table>',
+      '<h1>总纲</h1><h2>标题</h2><p>行内 <code>code</code> 与 <a href="https://example.com">链接</a></p><pre><code class="language-ts"><span class="hljs-keyword">const</span> x: number = 42</code></pre><table><tr><th>列</th></tr><tr><td>a</td></tr></table>',
     )
-    assert.match(out, /<h2 style="[^"]*margin: 0px 0px 16px(?: 0px)?;[^"]*border-left: 4px solid rgb\(216, 165, 34\);[^"]*"><span style="font-size: 22px;"><strong style="font-weight: 700;">标题<\/strong><\/span><\/h2>/)
-    assert.match(out, /<span class="hljs-keyword" style="color: rgb\(215, 58, 73\);">const<\/span>/)
-    assert.match(out, /<\/table><p[^>]*><br><\/p>$/)
+    assert.match(
+      out,
+      /<h1 style="[^"]*margin: 0px 0px 16px(?: 0px)?;[^"]*border-bottom: 1px solid rgb\(229, 231, 235\);[^"]*"><span style="font-size: 20px;"><strong style="font-weight: 700; color: rgb\(20, 20, 20\);">总纲<\/strong><\/span><\/h1>/,
+    )
+    assert.doesNotMatch(out, /<h1[^>]*border-left/)
+    assert.match(
+      out,
+      /<h2 style="[^"]*border-left: 3px solid rgb\(180, 83, 9\);[^"]*"><span style="font-size: 18px;"><strong style="font-weight: 700; color: rgb\(20, 20, 20\);">标题<\/strong><\/span><\/h2>/,
+    )
+    assert.match(out, /<code style="[^"]*background: rgb\(243, 244, 246\); color: rgb\(31, 41, 55\);/)
+    assert.doesNotMatch(out, /rgb\(199, 37, 78\)/)
+    assert.match(out, /<span class="hljs-keyword" style="color: rgb\(207, 34, 46\);">const<\/span>/)
+    assert.match(
+      out,
+      /<section style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 22px 0;"><table style="[^"]*table-layout: auto;[^"]*">[\s\S]*?<\/table><\/section><p[^>]*><br><\/p>$/,
+    )
+
+    // Must not double-wrap tables already inside <section>
+    const alreadyWrapped = prepareWechatHtml(
+      window.document,
+      '<section><table><tr><td>b</td></tr></table></section>',
+    )
+    assert.equal((alreadyWrapped.match(/<section/g) ?? []).length, 1)
   })
 
   it('sohu downgrades H2/H3 when no H1 exists and strips whitespace text nodes inside tables', () => {

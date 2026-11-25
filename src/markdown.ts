@@ -30,7 +30,21 @@ import type { ArticleBuilder, ArticleResult, MermaidRenderer } from './types.ts'
 
 const REMOTE_OR_INLINE = /^(https?:|data:)/i
 const MERMAID_LANG = /^mermaid(?:\s|$)/i
+const PLAIN_LANG = /^(?:plain|plaintext|text)?$/i
+const MERMAID_HEADER =
+  /^(?:(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b|(?:sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|gantt|pie|mindmap|timeline|journey|gitGraph|quadrantChart|xychart-beta)\b)/
 const SAFE_DATA_IMAGE = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i
+
+export function isMermaidCodeBlock(lang: string | null | undefined, value: string): boolean {
+  const trimmedLang = (lang ?? '').trim()
+  if (MERMAID_LANG.test(trimmedLang)) return true
+  if (!PLAIN_LANG.test(trimmedLang)) return false
+  const stripped = String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/^(?:\s|%%\{[\s\S]*?\}%%)+/, '')
+  const firstLine = stripped.split('\n', 1)[0]?.trim() ?? ''
+  return MERMAID_HEADER.test(firstLine)
+}
 
 const SANITIZE_SCHEMA = {
   ...defaultSchema,
@@ -117,7 +131,7 @@ function readAsDataUrl(win: Window, file: File, cache: Map<File, Promise<string>
 function countMermaid(node: Parent): number {
   let count = 0
   for (const child of node.children) {
-    if (child.type === 'code' && MERMAID_LANG.test((child.lang ?? '').trim())) {
+    if (child.type === 'code' && isMermaidCodeBlock(child.lang, child.value)) {
       count += 1
     } else if ('children' in child && Array.isArray(child.children)) {
       count += countMermaid(child as Parent)
@@ -182,7 +196,7 @@ export function createArticleBuilder({
       for (const child of parent.children) {
         if (child.type === 'code') {
           const codeNode = child as Code
-          if (MERMAID_LANG.test((codeNode.lang ?? '').trim())) {
+          if (isMermaidCodeBlock(codeNode.lang, codeNode.value)) {
             mermaidIndex += 1
             onProgress?.(`渲染图表 ${mermaidIndex}/${mermaidTotal}…`)
             try {
@@ -204,7 +218,18 @@ export function createArticleBuilder({
               nextChildren.push(paraNode as RootContent)
               continue
             } catch (error) {
-              mermaidErrors.push(error instanceof Error ? error.message : String(error))
+              const rawMsg = error instanceof Error ? error.message : String(error)
+              const isMissingEngine = /未检测到\s*Mermaid/.test(rawMsg)
+              const compact = rawMsg
+                .replace(/^Mermaid\s*语法错误[：:]\s*/i, '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .slice(0, 140)
+              mermaidErrors.push(
+                isMissingEngine
+                  ? `第 ${mermaidIndex} 张图表渲染失败：${compact}`
+                  : `第 ${mermaidIndex} 张图表语法错误：${compact || '请检查图表语法'}`,
+              )
             }
           }
           // Non-mermaid code blocks are preserved 100% verbatim

@@ -6,7 +6,7 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 import { visit } from 'unist-util-visit'
 import { describe, it } from 'vitest'
-import { createArticleBuilder, splitTitle } from '../src/markdown.ts'
+import { createArticleBuilder, isMermaidCodeBlock, splitTitle } from '../src/markdown.ts'
 import type { MermaidRenderer } from '../src/types.ts'
 
 function makeEnv(
@@ -103,16 +103,69 @@ describe('markdown unified AST pipeline', () => {
     assert.match(article.html, /<img[^>]+src="data:image\/png;base64,QUJD"/)
   })
 
-  it('degrades gracefully when mermaid rendering throws', async () => {
-    const { build } = makeEnv(async () => {
-      throw new Error('syntax error')
+  it('degrades gracefully when mermaid rendering throws and formats indexed error locations', async () => {
+    const { build } = makeEnv(async (code) => {
+      if (code.includes('bad graph')) throw new Error('Mermaid 语法错误：syntax error on line 2')
+      return 'data:image/png;base64,QUJD'
     })
-    const md = '# Fail\n\n~~~mermaid\nbad graph\n~~~\n'
+    const md = [
+      '# Fail',
+      '',
+      '```mermaid',
+      'flowchart LR',
+      '  A --> B',
+      '```',
+      '',
+      '~~~mermaid',
+      'bad graph',
+      '~~~',
+    ].join('\n')
     const article = await build(md)
+    assert.equal(article.imageCount, 1)
     assert.equal(article.mermaidErrors.length, 1)
-    assert.match(article.mermaidErrors[0], /syntax error/)
+    assert.match(article.mermaidErrors[0], /第 2 张图表语法错误：syntax error on line 2/)
     assert.match(article.markdown, /(?:```|~~~)mermaid/)
     assert.match(article.html, /<pre><code/)
+  })
+
+  it('auto-detects unlabelled and plain/plaintext/text mermaid blocks including leading directives', async () => {
+    const rendered: string[] = []
+    const { build } = makeEnv(async (code) => {
+      rendered.push(code.trim())
+      return 'data:image/png;base64,QUJD'
+    })
+
+    assert.equal(isMermaidCodeBlock('', 'flowchart LR\n  A --> B'), true)
+    assert.equal(isMermaidCodeBlock('plain', '  %%{init: {"theme": "base"}}%%\nsequenceDiagram\n  A->>B: hi'), true)
+    assert.equal(isMermaidCodeBlock('plaintext', 'stateDiagram-v2\n  [*] --> Idle'), true)
+    assert.equal(isMermaidCodeBlock('text', 'graph TD\n  A --> B'), true)
+    assert.equal(isMermaidCodeBlock('ts', 'flowchart LR\n  A --> B'), false)
+    assert.equal(isMermaidCodeBlock('', 'const flowchart = 1'), false)
+
+    const md = [
+      '# Auto Detect',
+      '',
+      '```',
+      'flowchart LR',
+      '  A[客户/银行账户] —> B[成集云]',
+      '```',
+      '',
+      '```text',
+      '%%{init: {"theme": "base"}}%%',
+      'sequenceDiagram',
+      '  Alice->>Bob: Sync',
+      '```',
+      '',
+      '```',
+      'plain code block',
+      '```',
+    ].join('\n')
+
+    const article = await build(md)
+    assert.equal(rendered.length, 2)
+    assert.equal(article.imageCount, 2)
+    assert.deepEqual(article.mermaidErrors, [])
+    assert.match(article.html, /plain code block/)
   })
 
   it('records missing local images as placeholders without breaking other images', async () => {

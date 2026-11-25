@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 declare const __MERMAID_VERSION__: string
-declare const __MERMAID_SHA256__: string
 
 declare module 'stylis' {
   export interface Element {

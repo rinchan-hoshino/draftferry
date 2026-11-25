@@ -114,7 +114,7 @@ export function prepareWechatHtml(doc: Document, html: string): string {
   const container = doc.createElement('div')
   container.innerHTML = html
 
-  const headingSizes = [24, 22, 19, 17, 16, 16]
+  const headingSizes = [20, 18, 16, 15, 15, 15]
   for (const heading of container.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')) {
     const level = Number(heading.tagName[1])
     const size = `${headingSizes[level - 1]}px`
@@ -135,6 +135,17 @@ export function prepareWechatHtml(doc: Document, html: string): string {
       if (node.nodeType === 3 && !(node.textContent ?? '').trim()) node.remove()
     }
     if (!list.querySelector('li')) list.remove()
+  }
+
+  for (const table of container.querySelectorAll('table')) {
+    if (table.parentElement?.tagName === 'SECTION') continue
+    const wrapper = doc.createElement('section')
+    wrapper.setAttribute(
+      'style',
+      'width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 22px 0;',
+    )
+    table.replaceWith(wrapper)
+    wrapper.append(table)
   }
 
   ensureTrailingParagraph(container)

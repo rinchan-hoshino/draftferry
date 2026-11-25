@@ -89,8 +89,31 @@ export function writeTitleControl(win: Window, control: HTMLElement, title: stri
   else setContentEditableText(win, control, title)
 }
 
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number.parseInt(dec, 10)))
+    .replace(/&(?:lt|gt|amp|quot|apos);/gi, (entity) => {
+      switch (entity.toLowerCase()) {
+        case '&lt;':
+          return '<'
+        case '&gt;':
+          return '>'
+        case '&quot;':
+          return '"'
+        case '&apos;':
+          return "'"
+        default:
+          return '&'
+      }
+    })
+}
+
 export const squash = (text: string | null | undefined): string =>
-  (text ?? '').replace(/<[^>]*>/g, '').replace(/&nbsp;|\s+/g, '')
+  decodeBasicEntities((text ?? '').replace(/<[^>]*>/g, '')).replace(/\s+/g, '')
 
 export function textLength(html: string): number {
   return squash(html).length

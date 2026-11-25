@@ -1,8 +1,12 @@
 p {
-  margin: 0 0 20px;
-  font-size: 16px;
-  line-height: 1.8;
-  color: #2b2b2b;
+  margin: 0 0 18px;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.82;
+  color: #262626;
+  letter-spacing: 0.02em;
+  text-align: left;
+  word-break: break-word;
 }
 
 h1,
@@ -11,64 +15,79 @@ h3,
 h4,
 h5,
 h6 {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   font-weight: 700;
-  line-height: 1.5;
-  color: #202020;
+  color: #141414;
+  text-align: left;
+  word-break: break-word;
 }
 
 h1 {
-  font-size: 24px;
-  margin: 32px 0 16px;
-  border-left: 4px solid #d8a522;
-  padding-left: 10px;
+  font-size: 20px;
+  line-height: 1.4;
+  margin: 36px 0 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 h2 {
-  font-size: 22px;
-  margin: 32px 0 16px;
-  border-left: 4px solid #d8a522;
+  font-size: 18px;
+  line-height: 1.45;
+  margin: 32px 0 14px;
   padding-left: 10px;
+  border-left: 3px solid #b45309;
 }
 
 h3 {
-  font-size: 19px;
-  margin: 26px 0 12px;
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 24px 0 10px;
 }
 
-h4 {
-  font-size: 17px;
-  margin: 22px 0 12px;
-}
-
+h4,
 h5,
 h6 {
-  font-size: 16px;
-  margin: 22px 0 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 18px 0 8px;
 }
 
 blockquote {
   margin: 22px 0;
-  padding: 14px 18px;
-  border-left: 4px solid #d9d9d9;
-  background: #f7f7f7;
-  color: #555;
-  line-height: 1.8;
+  padding: 12px 16px;
+  border-left: 3px solid #d1d5db;
+  background: #f8f9fa;
+  border-radius: 0 4px 4px 0;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.82;
+  color: #525252;
+  letter-spacing: 0.02em;
+  text-align: left;
+  word-break: break-word;
 }
 
 blockquote p {
-  margin: 0 0 12px;
-  font-size: 16px;
-  line-height: 1.8;
-  color: #555;
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.82;
+  color: #525252;
+  letter-spacing: 0.02em;
+  text-align: left;
+  word-break: break-word;
 }
 
 ul,
 ol {
-  margin: 0 0 20px;
-  padding-left: 1.8em;
-  font-size: 16px;
-  line-height: 1.8;
-  color: #2b2b2b;
+  margin: 0 0 18px;
+  padding-left: 1.6em;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  line-height: 1.82;
+  color: #262626;
+  letter-spacing: 0.02em;
+  text-align: left;
+  word-break: break-word;
 }
 
 li {
@@ -76,15 +95,18 @@ li {
 }
 
 li p {
-  margin: 8px 0;
-  font-size: 16px;
-  line-height: 1.8;
-  color: #2b2b2b;
+  margin: 6px 0;
+  font-size: 15px;
+  line-height: 1.82;
+  color: #262626;
+  letter-spacing: 0.02em;
+  text-align: left;
+  word-break: break-word;
 }
 
 li > ul,
 li > ol {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
 }
 
 blockquote > :last-child,
@@ -94,131 +116,148 @@ li > :last-child {
 
 table {
   width: 100%;
-  margin: 22px 0;
+  min-width: 100%;
+  margin: 0;
   border-collapse: collapse;
-  table-layout: fixed;
-  font-size: 14px;
-  line-height: 1.65;
-  color: #2b2b2b;
+  table-layout: auto;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #262626;
 }
 
 th {
-  padding: 10px 12px;
-  border: 1px solid #cfcfcf;
-  background: #f2f2f2;
-  font-weight: 700;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-bottom: 1.5px solid #d1d5db;
+  background: #f8f9fa;
+  color: #141414;
+  font-weight: 600;
   text-align: left;
-  word-break: break-word;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 td {
-  padding: 10px 12px;
-  border: 1px solid #cfcfcf;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
   text-align: left;
-  word-break: break-word;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+table code {
+  font-size: 12.5px;
+  white-space: nowrap;
 }
 
 pre {
   margin: 22px 0;
-  padding: 16px;
-  border: 1px solid #dedede;
-  border-radius: 5px;
-  background: #f5f5f5;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8f9fa;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 code {
-  padding: 2px 4px;
-  border-radius: 3px;
-  background: #f2f2f2;
-  color: #c7254e;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 0.9em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #1f2937;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13.5px;
 }
 
 pre code {
   padding: 0;
+  border-radius: 0;
   background: transparent;
-  color: #24292e;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 14px;
+  color: #1f2937;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13.5px;
 }
 
 img {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 22px auto;
+  margin: 24px auto;
+  border-radius: 4px;
 }
 
 hr {
-  margin: 30px 0;
+  margin: 32px auto;
+  width: 32%;
   border: 0;
-  border-top: 1px solid #dedede;
+  border-top: 1px solid #e5e7eb;
 }
 
 a {
-  color: #1677b3;
-  text-decoration: underline;
+  color: #b45309;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(180, 83, 9, 0.35);
   word-break: break-word;
 }
 
 strong {
   font-weight: 700;
+  color: #141414;
 }
 
-/* GitHub Light syntax highlighting */
+/* Editorial Light syntax highlighting (all tokens WCAG AA >= 4.5:1 on #f8f9fa) */
 .hljs-comment,
 .hljs-quote {
-  color: #6a737d;
+  color: #57606a;
   font-style: italic;
 }
 
 .hljs-keyword,
 .hljs-selector-tag,
 .hljs-subst {
-  color: #d73a49;
+  color: #cf222e;
 }
 
 .hljs-string,
 .hljs-doctag,
 .hljs-regexp {
-  color: #032f62;
+  color: #0a3069;
 }
 
 .hljs-number,
 .hljs-literal,
 .hljs-variable,
 .hljs-template-variable {
-  color: #005cc5;
+  color: #0550ae;
 }
 
 .hljs-title,
 .hljs-section {
-  color: #6f42c1;
+  color: #6639ba;
 }
 
 .hljs-built_in,
 .hljs-type {
-  color: #e36209;
+  color: #953800;
 }
 
 .hljs-attr,
 .hljs-attribute {
-  color: #005cc5;
+  color: #0550ae;
 }
 
 .hljs-tag,
 .hljs-name {
-  color: #22863a;
+  color: #116329;
 }
 
 .hljs-symbol,
 .hljs-bullet,
 .hljs-link {
-  color: #005cc5;
+  color: #0550ae;
 }
 
 .hljs-meta {
@@ -226,11 +265,11 @@ strong {
 }
 
 .hljs-addition {
-  color: #22863a;
-  background-color: #f0fff4;
+  color: #116329;
+  background-color: #dafbe1;
 }
 
 .hljs-deletion {
-  color: #b31d28;
-  background-color: #ffeef0;
+  color: #82071e;
+  background-color: #ffebe9;
 }

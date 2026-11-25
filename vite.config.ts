@@ -1,27 +1,30 @@
 /// <reference types="vitest/config" />
-import { createHash } from 'node:crypto'
-import { copyFile, mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import monkey from 'vite-plugin-monkey'
+import { patchMermaidForTampermonkey } from './src/mermaid-vendor.ts'
 
 const rootDir = dirname(fileURLToPath(import.meta.url))
-const pkg = JSON.parse(await readFile(resolve(rootDir, 'package.json'), 'utf8')) as { version: string }
+const pkg = JSON.parse(await readFile(resolve(rootDir, 'package.json'), 'utf8')) as {
+  version: string
+}
 const mermaidPkg = JSON.parse(
   await readFile(resolve(rootDir, 'node_modules/mermaid/package.json'), 'utf8'),
 ) as { version: string }
 const mermaidVersion = mermaidPkg.version
 const mermaidSrc = resolve(rootDir, 'node_modules/mermaid/dist/mermaid.min.js')
-const mermaidSha256 = createHash('sha256').update(await readFile(mermaidSrc)).digest('hex')
 
-function copyMermaidVendor(): Plugin {
+function buildMermaidVendor(): Plugin {
   return {
-    name: 'copy-mermaid-vendor',
+    name: 'build-mermaid-vendor',
     async closeBundle() {
+      const raw = await readFile(mermaidSrc, 'utf8')
+      const patched = patchMermaidForTampermonkey(raw)
       const destDir = resolve(rootDir, 'dist/vendor')
       await mkdir(destDir, { recursive: true })
-      await copyFile(mermaidSrc, resolve(destDir, `mermaid-${mermaidVersion}.min.js`))
+      await writeFile(resolve(destDir, `mermaid-${mermaidVersion}-tm.min.js`), patched, 'utf8')
     },
   }
 }
@@ -36,7 +39,6 @@ export default defineConfig({
   define: {
     __FOLIO_VERSION__: JSON.stringify(pkg.version),
     __MERMAID_VERSION__: JSON.stringify(mermaidVersion),
-    __MERMAID_SHA256__: JSON.stringify(mermaidSha256),
   },
   plugins: [
     monkey({
@@ -48,7 +50,8 @@ export default defineConfig({
         },
         namespace: 'k-neco.folio',
         version: pkg.version,
-        description: '把 Markdown、本地图片和 Mermaid 图导入八个内容平台的编辑页。不会自动保存或发布。',
+        description:
+          '把 Markdown、本地图片和 Mermaid 图导入八个内容平台的编辑页。不会自动保存或发布。',
         author: 'RinChan',
         match: [
           'https://zhuanlan.zhihu.com/write*',
@@ -60,8 +63,10 @@ export default defineConfig({
           'https://msp.aliyun.com/*',
           'https://console.cloud.tencent.com/serviceprovider/products/createNew*',
         ],
-        grant: ['unsafeWindow', 'window.onurlchange', 'GM_xmlhttpRequest'],
-        connect: ['acv.k-neco.com', 'cdn.jsdelivr.net'],
+        require: [`https://acv.k-neco.com/tools/vendor/mermaid-${mermaidVersion}-tm.min.js`],
+        updateURL: 'https://acv.k-neco.com/tools/folio.user.js',
+        downloadURL: 'https://acv.k-neco.com/tools/folio.user.js',
+        grant: ['unsafeWindow', 'window.onurlchange'],
         'run-at': 'document-idle',
         noframes: true,
       },
@@ -69,6 +74,6 @@ export default defineConfig({
         fileName: 'folio.user.js',
       },
     }),
-    copyMermaidVendor(),
+    buildMermaidVendor(),
   ],
 })

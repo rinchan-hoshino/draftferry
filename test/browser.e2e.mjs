@@ -7,10 +7,11 @@ import { chromium } from 'playwright-core'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const bundlePath = resolve(root, 'dist/folio.user.js')
+const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const mermaidPkg = JSON.parse(
   await readFile(resolve(root, 'node_modules/mermaid/package.json'), 'utf8'),
 )
-const vendorMermaidPath = resolve(root, `dist/vendor/mermaid-${mermaidPkg.version}.min.js`)
+const vendorMermaidPath = resolve(root, `dist/vendor/mermaid-${mermaidPkg.version}-tm.min.js`)
 
 const bundleStat = await stat(bundlePath)
 assert.ok(
@@ -22,40 +23,85 @@ console.log(`PASS [0/4] dist/folio.user.js size check: ${bundleStat.size} bytes 
 const bundleCode = await readFile(bundlePath, 'utf8')
 const vendorMermaidCode = await readFile(vendorMermaidPath, 'utf8')
 
+// Verify userscript metadata & zero eval in dist/folio.user.js
+assert.match(bundleCode, new RegExp(`@version\\s+${pkg.version.replace(/\./g, '\\.')}`))
+assert.match(
+  bundleCode,
+  new RegExp(
+    `@require\\s+https://acv\\.k-neco\\.com/tools/vendor/mermaid-${mermaidPkg.version.replace(/\./g, '\\.')}-tm\\.min\\.js`,
+  ),
+)
+assert.match(bundleCode, /@updateURL\s+https:\/\/acv\.k-neco\.com\/tools\/folio\.user\.js/)
+assert.match(bundleCode, /@downloadURL\s+https:\/\/acv\.k-neco\.com\/tools\/folio\.user\.js/)
+assert.doesNotMatch(bundleCode, /\(0,\s*eval\)/)
+
+const STRICT_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
 const CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const TINY_PNG_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+
+// Wrap vendor Mermaid inside a closure identical to Tampermonkey @require execution
+const wrappedVendorScript = `(function(window, GM_info){\n${vendorMermaidCode}\n})(window, {});`
 
 async function setupMockPage(context, url, html, extraRoutes) {
   const page = await context.newPage()
   const origin = new URL(url).origin
   await page.route('**/*', async (route) => {
     const reqUrl = route.request().url()
+    if (reqUrl === `${origin}/__tm__/mermaid-tm.min.js`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/javascript; charset=utf-8',
+        body: wrappedVendorScript,
+      })
+    }
+    if (reqUrl === `${origin}/__tm__/folio.user.js`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/javascript; charset=utf-8',
+        body: bundleCode,
+      })
+    }
     if (extraRoutes) {
       const handled = await extraRoutes(route, reqUrl)
       if (handled) return
     }
     if (reqUrl.startsWith(origin)) {
-      return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html })
+      return route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Security-Policy': STRICT_CSP,
+        },
+        contentType: 'text/html; charset=utf-8',
+        body: html,
+      })
     }
     return route.abort()
   })
   await page.goto(url, { waitUntil: 'domcontentloaded' })
-  return page
+  return { page, origin }
+}
+
+async function injectUserscript(page, origin, withMermaid = true) {
+  if (withMermaid) {
+    await page.addScriptTag({ url: `${origin}/__tm__/mermaid-tm.min.js` })
+  }
+  await page.addScriptTag({ url: `${origin}/__tm__/folio.user.js` })
 }
 
 const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true })
 
 try {
-  // 1. SPA route mount / unmount test on Baijiahao
+  // 1. SPA route mount / unmount test on Baijiahao under strict CSP
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-    const page = await setupMockPage(
+    const { page, origin } = await setupMockPage(
       context,
       'https://baijiahao.baidu.com/builder/rc/home',
       '<html><body><h1>Home</h1></body></html>',
     )
-    await page.addScriptTag({ content: bundleCode })
+    await injectUserscript(page, origin)
     assert.equal(await page.locator('#rin-folio').count(), 0, 'must NOT mount on non-editor home page')
 
     await page.evaluate(() => {
@@ -70,14 +116,13 @@ try {
     await page.locator('#rin-folio').waitFor({ state: 'detached', timeout: 3000 })
     assert.equal(await page.locator('#rin-folio').count(), 0, 'must auto-unmount on leaving edit route')
     await context.close()
-    console.log('PASS [1/4] SPA pushState auto-mount & unmount')
+    console.log('PASS [1/4] SPA pushState auto-mount & unmount under strict CSP')
   }
 
-  // 2. Tencent Market React Fiber + wangEditor 3.x + lazy Mermaid PNG + rollback + diagnostic
+  // 2. Tencent Market React Fiber + wangEditor 3.x + strict-CSP @require Mermaid PNG + rollback + diagnostic
   {
-    let mermaidFetchCount = 0
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-    const page = await setupMockPage(
+    const { page, origin } = await setupMockPage(
       context,
       'https://console.cloud.tencent.com/serviceprovider/products/createNew?productType=MARKET',
       `<html><body style="font-family:sans-serif;padding:24px">
@@ -87,18 +132,23 @@ try {
         </div>
       </body></html>`,
       async (route, reqUrl) => {
-        if (reqUrl === `https://acv.k-neco.com/tools/vendor/mermaid-${mermaidPkg.version}.min.js`) {
-          mermaidFetchCount += 1
+        if (reqUrl.startsWith('https://console.cloud.tencent.com/u/')) {
           await route.fulfill({
             status: 200,
-            contentType: 'application/javascript; charset=utf-8',
-            body: vendorMermaidCode,
+            contentType: 'image/png',
+            body: Buffer.from(TINY_PNG_B64, 'base64'),
           })
           return true
         }
         return false
       },
     )
+
+    const cspErrors = []
+    page.on('pageerror', (err) => cspErrors.push(err.message))
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') cspErrors.push(msg.text())
+    })
 
     await page.evaluate(() => {
       const editorEl = document.querySelector('.w-e-text')
@@ -120,15 +170,14 @@ try {
           customUploadImg(files, insert) {
             if (window.__failUpload) return Promise.reject(new Error('network down'))
             window.__uploads.push(files[0].name)
-            insert(`https://cdn.tencent.test/u/${window.__uploads.length}.png`)
+            insert(`https://console.cloud.tencent.com/u/${window.__uploads.length}.png`)
           },
         },
       }
       editorEl['__reactFiber$e2e'] = { return: { stateNode: { editor: wang } } }
     })
 
-    await page.addScriptTag({ content: bundleCode })
-    assert.equal(mermaidFetchCount, 0, 'Mermaid must NOT be loaded on page init')
+    await injectUserscript(page, origin)
 
     const host = page.locator('#rin-folio')
     await host.waitFor({ state: 'attached', timeout: 3000 })
@@ -152,8 +201,8 @@ try {
       '![重复图](a.png)',
       '',
       '~~~mermaid',
-      'graph LR',
-      '  A[开始] --> B[完成]',
+      'flowchart LR',
+      '  A["GoCardless<br/>客户/银行账户/授权"] —>|"同步"| B[成集云/中台] style A fill:#F2994A,stroke:#333,color:#fff',
       '~~~',
     ].join('\n')
 
@@ -170,11 +219,11 @@ try {
 
     await host.locator('.go').click()
     await host.locator('.status.ok').waitFor({ state: 'visible', timeout: 15000 })
-    assert.equal(mermaidFetchCount, 1, 'Mermaid should be lazy-loaded once when diagram exists')
+    assert.deepEqual(cspErrors, [], `unexpected CSP/page errors: ${cspErrors.join('; ')}`)
 
     const editorHtml = await page.locator('.w-e-text').innerHTML()
-    assert.match(editorHtml, /cdn\.tencent\.test\/u\/1\.png/)
-    assert.match(editorHtml, /cdn\.tencent\.test\/u\/2\.png/)
+    assert.match(editorHtml, /console\.cloud\.tencent\.com\/u\/1\.png/)
+    assert.match(editorHtml, /console\.cloud\.tencent\.com\/u\/2\.png/)
     assert.match(editorHtml, /<code>!\[ignored\]\(nope\.png\)<\/code>/)
 
     // Trigger failure & verify rollback + diagnostic
@@ -193,13 +242,13 @@ try {
     assert.equal(await page.locator('.w-e-text').innerHTML(), editorHtml, 'must preserve previous content on error')
 
     await context.close()
-    console.log('PASS [2/4] Tencent Market + Shadow DOM Preact UI + lazy Mermaid + rollback')
+    console.log('PASS [2/4] Tencent Market + strict-CSP @require Mermaid PNG + rollback')
   }
 
-  // 3. WeChat MP: paste Markdown + syntax highlighting + gold border + XSS blocked
+  // 3. WeChat MP: strict-CSP Mermaid data:image/png export + unlabelled/dirty syntax + editorial theme + error feedback + XSS blocked
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-    const page = await setupMockPage(
+    const { page, origin } = await setupMockPage(
       context,
       'https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit_v2',
       `<html><body>
@@ -207,6 +256,12 @@ try {
         <div class="ProseMirror" contenteditable="true">从这里开始写正文</div>
       </body></html>`,
     )
+    const cspErrors = []
+    page.on('pageerror', (err) => cspErrors.push(err.message))
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') cspErrors.push(msg.text())
+    })
+
     await page.evaluate(() => {
       window.__mpContent = ''
       window.__MP_Editor_JSAPI__ = {
@@ -219,42 +274,77 @@ try {
         },
       }
     })
-    await page.addScriptTag({ content: bundleCode })
+    await injectUserscript(page, origin)
 
     const host = page.locator('#rin-folio')
     await host.waitFor({ state: 'attached', timeout: 3000 })
     await host.locator('.toggle').click()
     await host.locator('.paste-toggle').click()
-    await host.locator('.paste-input').fill([
-      '# 微信文章标题',
-      '',
-      '## 架构亮点',
-      '',
-      '<script>alert("xss")</script>',
-      '',
-      '```ts',
-      'const count: number = 42',
-      '```',
-    ].join('\n'))
+    await host.locator('.paste-input').fill(
+      [
+        '# 微信文章标题',
+        '',
+        '## 架构亮点',
+        '',
+        '使用 `prepareWechatHtml` 排版。',
+        '',
+        '<script>alert("xss")</script>',
+        '',
+        '```',
+        'flowchart LR',
+        '  A["GoCardless<br/>客户/银行账户/授权"] —>|"同步"| B["成集云平台"]',
+        '  B ——>|"创建/审核"| C[金蝶云星空/客户档案] style A fill:#F2994A,stroke:#333,color:#fff style C fill:#27AE60,stroke:#333,color:#fff',
+        '```',
+        '',
+        '```ts',
+        'const count: number = 42',
+        '```',
+        '',
+        '| 阶段 | GoCardless 对象 | 金蝶目标单据 |',
+        '| :--- | :--- | :--- |',
+        '| 签约 | `Mandate` | 客户档案 |',
+        '| 扣款 | `Payment` | 收款单 |',
+      ].join('\n'),
+    )
 
     await host.locator('.go').click()
-    await host.locator('.status.ok').waitFor({ state: 'visible', timeout: 5000 })
+    await host.locator('.status.ok').waitFor({ state: 'visible', timeout: 15000 })
+    assert.deepEqual(cspErrors, [], `unexpected CSP/page errors: ${cspErrors.join('; ')}`)
 
     assert.equal(await page.locator('#title').inputValue(), '微信文章标题')
     const mpHtml = await page.evaluate(() => window.__mpContent)
     assert.doesNotMatch(mpHtml, /<script/i)
-    assert.match(mpHtml, /border-left: 4px solid rgb\(216, 165, 34\)/)
-    assert.match(mpHtml, /<span[^>]*style="color: rgb\([^)]+\);?"[^>]*>const<\/span>/)
+    assert.match(mpHtml, /border-left: 3px solid rgb\(180, 83, 9\)/)
+    assert.match(mpHtml, /<code style="[^"]*background: rgb\(243, 244, 246\)/)
+    assert.match(mpHtml, /<span[^>]*style="color: rgb\(207, 34, 46\);?"[^>]*>const<\/span>/)
+    assert.match(mpHtml, /<img[^>]+src="data:image\/png;base64,[A-Za-z0-9+/=]{100,}"/)
+    assert.match(
+      mpHtml,
+      /<section style="width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 22px 0;"><table style="[^"]*table-layout: auto;[^"]*">/,
+    )
     assert.match(mpHtml, /<p[^>]*><br><\/p>$/)
 
+    // Verify explicit warning in panel completion status when a Mermaid block has invalid syntax
+    await host.locator('.toggle').click()
+    await host.locator('.card').waitFor({ state: 'visible' })
+    await host.locator('.paste-toggle').click()
+    await host.locator('.paste-input').fill('# 坏图测试\n\n```mermaid\nflowchart LR\n  A --> --> -->\n```')
+    await host.locator('.go').click()
+    const warnStatus = host.locator('.status.warn')
+    await warnStatus.waitFor({ state: 'visible', timeout: 15000 })
+    const warnText = await warnStatus.textContent()
+    assert.match(warnText ?? '', /第 1 张图表语法错误/)
+
     await context.close()
-    console.log('PASS [3/4] WeChat MP paste + inline code syntax highlight + XSS sanitize')
+    console.log(
+      'PASS [3/4] WeChat MP strict-CSP Mermaid PNG + paper editorial theme + explicit syntax error warning',
+    )
   }
 
   // 4. Zhihu: Path A lossless Markdown + image upload + modal confirmation
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-    const page = await setupMockPage(
+    const { page, origin } = await setupMockPage(
       context,
       'https://zhuanlan.zhihu.com/write',
       `<html><body>
@@ -296,7 +386,7 @@ try {
         document.body.append(modal)
       })
     })
-    await page.addScriptTag({ content: bundleCode })
+    await injectUserscript(page, origin)
 
     const host = page.locator('#rin-folio')
     await host.waitFor({ state: 'attached', timeout: 3000 })
